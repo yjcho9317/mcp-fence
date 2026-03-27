@@ -9,6 +9,8 @@
 import type { JsonRpcMessage, ScanResult, AuditLogger as IAuditLogger } from '../types.js';
 import type { AuditStore } from './storage.js';
 import { createLogger } from '../logger.js';
+import { maskSecrets } from './masker.js';
+import { ALL_SECRET_PATTERNS } from '../detection/secrets.js';
 
 const log = createLogger('audit');
 
@@ -40,6 +42,11 @@ export class AuditLoggerImpl implements IAuditLogger {
     const toolName = extractToolName(message);
 
     try {
+      const rawMessage = JSON.stringify(message);
+      const rawFindings = JSON.stringify(result.findings);
+      const maskedMessage = maskSecrets(rawMessage, ALL_SECRET_PATTERNS);
+      const maskedFindings = maskSecrets(rawFindings, ALL_SECRET_PATTERNS);
+
       this.store.insert({
         timestamp: result.timestamp,
         direction: result.direction,
@@ -47,8 +54,8 @@ export class AuditLoggerImpl implements IAuditLogger {
         toolName,
         decision: result.decision,
         score: result.score,
-        findings: JSON.stringify(result.findings),
-        message: JSON.stringify(message),
+        findings: maskedFindings,
+        message: maskedMessage,
       });
     } catch (err) {
       // Audit failure must not crash the proxy

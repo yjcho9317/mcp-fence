@@ -202,15 +202,14 @@ describe('W5-SEC: Argument Constraint Bypass', () => {
   });
 
   describe('URL encoding bypass in arguments', () => {
-    it('VULN: URL-encoded path bypasses denyPattern', () => {
-      // %2Fetc%2F = /etc/ in URL encoding, but regex sees literal percent chars
+    it('FIXED: URL-encoded path is decoded before denyPattern check', () => {
       const result = evaluatePolicy('read_file', { path: '%2Fetc%2Fpasswd' }, readFilePolicy);
-      expect(result.action).toBe('allow');
+      expect(result.action).toBe('deny');
     });
 
-    it('VULN: partial URL encoding bypasses denyPattern', () => {
+    it('FIXED: partial URL encoding is decoded before denyPattern check', () => {
       const result = evaluatePolicy('read_file', { path: '/%65tc/passwd' }, readFilePolicy);
-      expect(result.action).toBe('allow');
+      expect(result.action).toBe('deny');
     });
   });
 
@@ -291,15 +290,13 @@ describe('W5-SEC: Argument Constraint Bypass', () => {
       expect(result.action).toBe('deny');
     });
 
-    it('VULN: array with encoded path may bypass depending on stringification', () => {
-      // String(["%2Fetc%2Fpasswd"]) = "%2Fetc%2Fpasswd"
+    it('FIXED: array with encoded path is decoded before check', () => {
       const result = evaluatePolicy(
         'read_file',
         { path: ['%2Fetc%2Fpasswd'] },
         readFilePolicy,
       );
-      // /etc/ regex does not match %2Fetc%2Fpasswd
-      expect(result.action).toBe('allow');
+      expect(result.action).toBe('deny');
     });
   });
 
@@ -1051,20 +1048,17 @@ describe('W5-SEC: Combined Attack Scenarios', () => {
     expect(result.action).toBe('allow');
   });
 
-  it('glob ordering + arg bypass = dangerous tool with bad args', () => {
+  it('FIXED: glob ordering + encoded arg — URL decoding catches it', () => {
     const policy = config([
       { tool: 'file_*', action: 'allow', args: [{ name: 'path', denyPattern: '/etc/' }] },
       { tool: 'file_exec', action: 'deny' },
     ]);
-    // 'file_exec' matches 'file_*' first (allow with arg check)
-    // Attacker uses URL-encoded path to bypass arg check
     const result = evaluatePolicy(
       'file_exec',
       { path: '%2Fetc%2Fshadow' },
       policy,
     );
-    // Glob matches first, arg check doesn't catch encoded path
-    expect(result.action).toBe('allow');
+    expect(result.action).toBe('deny');
   });
 
   it('homoglyph + wildcard deny = full bypass of deny-all', () => {

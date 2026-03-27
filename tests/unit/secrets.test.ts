@@ -13,6 +13,15 @@ const TEST_TOKENS = {
   stripeTest: ['sk', 'test', 'TESTFAKETESTFAKETESTFAKE'].join('_'),
   stripeLive: ['rk', 'live', 'FAKEFAKEFAKEFAKEFAKEFAKE'].join('_'),
   sendgrid: ['SG', 'aaaaaaaaaaaaaaaaaaaaaa', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'].join('.'),
+  github: ['ghp', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456'].join('_'),
+  githubShort: ['ghp', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join('_'),
+  githubOAuth: ['gho', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join('_'),
+  githubUser: ['ghu', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join('_'),
+  githubServer: ['ghs', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join('_'),
+  githubRefresh: ['ghr', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'].join('_'),
+  openai: ['sk', 'proj', 'abcdefghijklmnopqrstuvwxyz'].join('-'),
+  anthropic: ['sk', 'ant', 'api03', 'abcdefghijklmnopqrstuvwxyz'].join('-'),
+  anthropicShort: ['sk', 'ant', 'abcdefghijklmnopqrstuvwxyz'].join('-'),
 };
 
 const config: DetectionConfig = {
@@ -83,7 +92,7 @@ describe('Secret detection — API tokens', () => {
   const e = engine();
 
   it('should detect GitHub PAT', async () => {
-    const r = await e.scan(res('token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456'), 'response');
+    const r = await e.scan(res(`token: ${TEST_TOKENS.github}`), 'response');
     expect(r.findings.some((f) => f.ruleId === 'SEC-010')).toBe(true);
   });
 
@@ -103,12 +112,12 @@ describe('Secret detection — API tokens', () => {
   });
 
   it('should detect OpenAI key', async () => {
-    const r = await e.scan(res('OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz'), 'response');
+    const r = await e.scan(res(`OPENAI_API_KEY=${TEST_TOKENS.openai}`), 'response');
     expect(r.findings.some((f) => f.ruleId === 'SEC-014')).toBe(true);
   });
 
   it('should detect Anthropic key', async () => {
-    const r = await e.scan(res('ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz'), 'response');
+    const r = await e.scan(res(`ANTHROPIC_API_KEY=${TEST_TOKENS.anthropic}`), 'response');
     expect(r.findings.some((f) => f.ruleId === 'SEC-015')).toBe(true);
   });
 });
@@ -261,23 +270,23 @@ describe('SEC-010: GitHub Token — individual pattern', () => {
   const pattern = ALL_SECRET_PATTERNS.find((p) => p.id === 'SEC-010')!;
 
   it('should match ghp_ (classic PAT)', () => {
-    expect(pattern.pattern.test('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.githubShort)).toBe(true);
   });
 
   it('should match gho_ (OAuth token)', () => {
-    expect(pattern.pattern.test('gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.githubOAuth)).toBe(true);
   });
 
   it('should match ghu_ (user-to-server token)', () => {
-    expect(pattern.pattern.test('ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.githubUser)).toBe(true);
   });
 
   it('should match ghs_ (server-to-server token)', () => {
-    expect(pattern.pattern.test('ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.githubServer)).toBe(true);
   });
 
   it('should match ghr_ (refresh token)', () => {
-    expect(pattern.pattern.test('ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.githubRefresh)).toBe(true);
   });
 
   it('should NOT match ghp_ prefix alone', () => {
@@ -366,7 +375,7 @@ describe('SEC-014: OpenAI Key — individual pattern', () => {
   });
 
   it('should match sk-proj- project key', () => {
-    expect(pattern.pattern.test('sk-proj-abcdefghijklmnopqrstuvwxyz')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.openai)).toBe(true);
   });
 
   it('should NOT match sk- with too few characters', () => {
@@ -382,11 +391,11 @@ describe('SEC-015: Anthropic Key — individual pattern', () => {
   const pattern = ALL_SECRET_PATTERNS.find((p) => p.id === 'SEC-015')!;
 
   it('should match sk-ant- key', () => {
-    expect(pattern.pattern.test('sk-ant-abcdefghijklmnopqrstuvwxyz')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.anthropicShort)).toBe(true);
   });
 
   it('should match sk-ant-api03- variant', () => {
-    expect(pattern.pattern.test('sk-ant-api03-abcdefghijklmnopqrstuvwxyz')).toBe(true);
+    expect(pattern.pattern.test(TEST_TOKENS.anthropic)).toBe(true);
   });
 
   it('should NOT match sk-ant- with too few chars', () => {
@@ -596,7 +605,7 @@ describe('Secret detection — real-world format variations', () => {
   it('should detect GitHub fine-grained token prefix variants', async () => {
     // gho_, ghu_, ghs_, ghr_ are all matched by SEC-010
     const r = await e.scan(
-      res('Installation token: ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'),
+      res(`Installation token: ${TEST_TOKENS.githubServer}`),
       'response',
     );
     expect(r.findings.some((f) => f.ruleId === 'SEC-010')).toBe(true);
@@ -605,7 +614,7 @@ describe('Secret detection — real-world format variations', () => {
   it('should detect multiple secrets in one response', async () => {
     const text = [
       'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE',
-      'GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456',
+      `GITHUB_TOKEN=${TEST_TOKENS.github}`,
       'DATABASE_URL=postgres://admin:pass@db:5432/app',
     ].join('\n');
     const r = await e.scan(res(text), 'response');
@@ -633,7 +642,7 @@ describe('Secret detection — real-world format variations', () => {
   it('should detect secrets in .env file format', async () => {
     const envFile = [
       'NODE_ENV=production',
-      'API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz',
+      `API_KEY=${TEST_TOKENS.openai}`,
       'DB_HOST=localhost',
       'SECRET=my_super_secret_value_12345',
     ].join('\n');

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import { SqliteAuditStore } from '../../src/audit/storage.js';
+import { SqliteAuditStore, getOrCreateHmacKey } from '../../src/audit/storage.js';
 import { AuditLoggerImpl } from '../../src/audit/logger.js';
 import { toSarif, sarifToJson } from '../../src/audit/sarif.js';
 import type { JsonRpcMessage, ScanResult, Finding } from '../../src/types.js';
@@ -1133,5 +1133,214 @@ describe('CLI helpers — printTable', () => {
     }]);
 
     expect(output).toContain('0.00');
+  });
+});
+
+// ─── HMAC Hash Chain Tests ───
+
+describe('HMAC hash chain', () => {
+  let store: SqliteAuditStore;
+  let dir: string;
+  let hmacKey: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mcp-fence-hmac-test-'));
+    hmacKey = getOrCreateHmacKey(dir);
+    store = new SqliteAuditStore(join(dir, 'test.db'), { hmacKey });
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('should create and verify a valid chain of 5 events', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insert({
+        timestamp: 1000 + i * 100,
+        direction: 'request',
+        decision: i % 2 === 0 ? 'allow' : 'warn',
+        score: i * 0.1,
+        findings: '[]',
+        message: `msg-${i}`,
+      });
+    }
+
+    const result = store.verifyChain(hmacKey);
+    expect(result.valid).toBe(true);
+    expect(result.brokenAt).toBeUndefined();
+  });
+
+  it('should detect tampering with a single event', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insert({
+        timestamp: 1000 + i * 100,
+        direction: 'request',
+        decision: 'allow',
+        score: 0,
+        findings: '[]',
+      });
+    }
+
+    // Tamper with the third event's findings
+    const dbPath = join(dir, 'test.db');
+    const rawDb = new Database(dbPath);
+    rawDb.prepare("UPDATE events SET findings = '[{\"tampered\":true}]' WHERE id = 3").run();
+    rawDb.close();
+
+    const result = store.verifyChain(hmacKey);
+    expect(result.valid).toBe(false);
+    expect(result.brokenAt).toBe(3);
+  });
+
+  it('should detect chain break when prev_hmac is altered', () => {
+    for (let i = 0; i < 3; i++) {
+      store.insert({
+        timestamp: 1000 + i,
+        direction: 'request',
+        decision: 'allow',
+        score: 0,
+        findings: '[]',
+      });
+    }
+
+    const dbPath = join(dir, 'test.db');
+    const rawDb = new Database(dbPath);
+    rawDb.prepare("UPDATE events SET prev_hmac = 'forged' WHERE id = 2").run();
+    rawDb.close();
+
+    const result = store.verifyChain(hmacKey);
+    expect(result.valid).toBe(false);
+    expect(result.brokenAt).toBe(2);
+  });
+
+  it('should return valid for empty database', () => {
+    const result = store.verifyChain(hmacKey);
+    expect(result.valid).toBe(true);
+  });
+
+  it('should store hmac and prev_hmac columns', () => {
+    store.insert({
+      timestamp: 1000,
+      direction: 'request',
+      decision: 'allow',
+      score: 0,
+      findings: '[]',
+    });
+
+    const events = store.query();
+    expect(events[0]!.hmac).toBeTruthy();
+    expect(events[0]!.prev_hmac).toBe('genesis');
+  });
+
+  it('should chain prev_hmac to previous hmac', () => {
+    store.insert({ timestamp: 1000, direction: 'request', decision: 'allow', score: 0, findings: '[]' });
+    store.insert({ timestamp: 2000, direction: 'request', decision: 'allow', score: 0, findings: '[]' });
+
+    // Query in ASC order via raw DB
+    const dbPath = join(dir, 'test.db');
+    const rawDb = new Database(dbPath);
+    const rows = rawDb.prepare('SELECT hmac, prev_hmac FROM events ORDER BY id ASC').all() as Array<{ hmac: string; prev_hmac: string }>;
+    rawDb.close();
+
+    expect(rows[0]!.prev_hmac).toBe('genesis');
+    expect(rows[1]!.prev_hmac).toBe(rows[0]!.hmac);
+  });
+});
+
+// ─── HMAC Key Management Tests ───
+
+describe('getOrCreateHmacKey', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mcp-fence-key-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('should create a key file on first call', () => {
+    const key = getOrCreateHmacKey(dir);
+    expect(key).toHaveLength(64); // 32 bytes in hex
+    expect(existsSync(join(dir, 'hmac.key'))).toBe(true);
+  });
+
+  it('should return the same key on subsequent calls', () => {
+    const key1 = getOrCreateHmacKey(dir);
+    const key2 = getOrCreateHmacKey(dir);
+    expect(key1).toBe(key2);
+  });
+
+  it('should create nested directories if needed', () => {
+    const nested = join(dir, 'nested', 'path');
+    const key = getOrCreateHmacKey(nested);
+    expect(key).toHaveLength(64);
+  });
+});
+
+// ─── DB Size Limit Tests ───
+
+describe('DB size limit and pruning', () => {
+  let store: SqliteAuditStore;
+  let dir: string;
+  let dbPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mcp-fence-prune-test-'));
+    dbPath = join(dir, 'test.db');
+  });
+
+  afterEach(() => {
+    try { store.close(); } catch { /* may already be closed */ }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('should prune when DB exceeds size limit', () => {
+    // Set a very small size limit to trigger pruning
+    store = new SqliteAuditStore(dbPath, { maxDbSizeMb: 0.01 }); // ~10KB limit
+
+    // Insert enough data to exceed the tiny limit
+    const bigFindings = JSON.stringify([{
+      ruleId: 'TEST',
+      message: 'x'.repeat(500),
+      severity: 'low',
+      category: 'injection',
+      confidence: 0.5,
+    }]);
+
+    // Insert 200 events (prune check happens every 100)
+    for (let i = 0; i < 200; i++) {
+      store.insert({
+        timestamp: 1000 + i,
+        direction: 'request',
+        decision: 'allow',
+        score: 0,
+        findings: bigFindings,
+        message: 'x'.repeat(200),
+      });
+    }
+
+    // After pruning, count should be less than 200
+    const count = store.count();
+    expect(count).toBeLessThan(200);
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('should not prune when under size limit', () => {
+    store = new SqliteAuditStore(dbPath, { maxDbSizeMb: 100 });
+
+    for (let i = 0; i < 200; i++) {
+      store.insert({
+        timestamp: 1000 + i,
+        direction: 'request',
+        decision: 'allow',
+        score: 0,
+        findings: '[]',
+      });
+    }
+
+    expect(store.count()).toBe(200);
   });
 });

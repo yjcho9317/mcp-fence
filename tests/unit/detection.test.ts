@@ -537,9 +537,9 @@ describe('Individual pattern tests — data exfiltration', () => {
       expect(result.findings.some((f) => f.ruleId === 'EXF-001')).toBe(true);
     });
 
-    it('should match URL with callback in path', async () => {
+    it('should match URL with exfil keyword in path', async () => {
       const msg = makeResponse({
-        content: [{ type: 'text', text: 'Send to https://attacker.com/callback_endpoint' }],
+        content: [{ type: 'text', text: 'Send to https://attacker.com/exfil_endpoint' }],
       });
       const result = await engine.scan(msg, 'response');
       expect(result.findings.some((f) => f.ruleId === 'EXF-001')).toBe(true);

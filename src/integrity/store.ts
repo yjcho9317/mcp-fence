@@ -1,12 +1,6 @@
 /**
  * In-memory hash store for tool description pinning.
- *
- * Stores SHA-256 hashes of tool descriptions. On first encounter, a tool's
- * description hash is "pinned." Subsequent encounters are compared against
- * the pinned hash to detect rug-pull attacks.
- *
- * v0.1 uses in-memory storage (lost on restart). v0.2+ will persist to SQLite
- * via the adapter pattern defined in CLAUDE.md.
+ * Tracks original descriptions to detect gradual drift (boiling frog).
  */
 
 import { createLogger } from '../logger.js';
@@ -14,14 +8,16 @@ import { createLogger } from '../logger.js';
 const log = createLogger('integrity');
 
 export interface PinnedTool {
-  /** Tool name */
   name: string;
-  /** SHA-256 hash of the normalized description */
   hash: string;
-  /** When this tool was first pinned */
   pinnedAt: number;
-  /** Original description (stored for diffing on mismatch) */
   description: string;
+  /** Original hash from the very first pin (never changes) */
+  originalHash: string;
+  /** Original description from the very first pin */
+  originalDescription: string;
+  /** Number of times the description has changed */
+  changeCount: number;
 }
 
 export interface HashStore {
@@ -56,22 +52,27 @@ export class MemoryHashStore implements HashStore {
       }
       // Different hash — rug-pull detected. Update the pin to the new hash
       // so subsequent checks compare against the latest known description.
-      log.warn(`Hash mismatch for tool "${toolName}": pinned=${existing.hash.slice(0, 8)}... new=${hash.slice(0, 8)}...`);
+      log.warn(`Hash mismatch for tool "${toolName}": pinned=${existing.hash.slice(0, 8)}... new=${hash.slice(0, 8)}... (change #${existing.changeCount + 1})`);
       this.store.set(toolName, {
         name: toolName,
         hash,
         pinnedAt: existing.pinnedAt,
         description,
+        originalHash: existing.originalHash,
+        originalDescription: existing.originalDescription,
+        changeCount: existing.changeCount + 1,
       });
       return false;
     }
 
-    // First time — pin it
     this.store.set(toolName, {
       name: toolName,
       hash,
       pinnedAt: Date.now(),
       description,
+      originalHash: hash,
+      originalDescription: description,
+      changeCount: 0,
     });
     log.debug(`Pinned tool "${toolName}": ${hash.slice(0, 12)}...`);
     return true;

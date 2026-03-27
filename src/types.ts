@@ -143,6 +143,8 @@ export interface LogConfig {
   level: 'debug' | 'info' | 'warn' | 'error';
   /** Log file path (optional, defaults to stderr) */
   file?: string;
+  /** Maximum audit DB size in megabytes (default: 100) */
+  maxDbSizeMb?: number;
 }
 
 export interface DetectionConfig {

@@ -9,9 +9,17 @@ export const CREATE_EVENTS_TABLE = `
     decision   TEXT    NOT NULL CHECK(decision IN ('allow', 'block', 'warn')),
     score      REAL    NOT NULL,
     findings   TEXT    NOT NULL DEFAULT '[]',
-    message    TEXT
+    message    TEXT,
+    hmac       TEXT,
+    prev_hmac  TEXT
   )
 `;
+
+/** SQL to add HMAC columns to an existing events table. */
+export const MIGRATE_ADD_HMAC = [
+  `ALTER TABLE events ADD COLUMN hmac TEXT`,
+  `ALTER TABLE events ADD COLUMN prev_hmac TEXT`,
+];
 
 /** SQL to create indexes for common queries. */
 export const CREATE_INDEXES = [
@@ -31,4 +39,6 @@ export interface EventRow {
   score: number;
   findings: string;
   message: string | null;
+  hmac: string | null;
+  prev_hmac: string | null;
 }

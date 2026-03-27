@@ -20,6 +20,7 @@ const CONFIG_FILENAME = 'fence.config.yaml';
 const logConfigSchema = z.object({
   level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   file: z.string().optional(),
+  maxDbSizeMb: z.number().positive().default(100),
 });
 
 const detectionConfigSchema = z.object({
@@ -55,7 +56,7 @@ const fenceConfigSchema = z.object({
 
 export const DEFAULT_CONFIG: FenceConfig = {
   mode: 'monitor',
-  log: { level: 'info' },
+  log: { level: 'info', maxDbSizeMb: 100 },
   detection: {
     warnThreshold: 0.5,
     blockThreshold: 0.8,

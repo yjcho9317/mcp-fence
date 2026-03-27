@@ -93,12 +93,20 @@ function safeRegexTest(pattern: string, input: string, flags = ''): boolean | nu
   }
 }
 
+function normalizeArgValue(value: string): string {
+  let normalized = value;
+  try { normalized = decodeURIComponent(normalized); } catch {}
+  normalized = normalized.replace(/[\u200B-\u200F\u2060-\u206F\u00AD\uFEFF\u034F\x00]/g, '');
+  return normalized;
+}
+
 function checkArgConstraint(
   argValue: unknown,
   constraint: ArgConstraint,
 ): string | null {
   if (argValue == null) return null;
-  const strValue = safeStringify(argValue);
+  const rawValue = safeStringify(argValue);
+  const strValue = normalizeArgValue(rawValue);
 
   const flags = constraint.caseInsensitive ? 'i' : '';
 

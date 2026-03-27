@@ -137,20 +137,30 @@ export class HashPinChecker {
 
       this.store.pin(tool.name, hash, tool.description);
 
+      const changeCount = pinned.changeCount + 1;
+      const isBoilingFrog = changeCount >= 3;
+
       findings.push({
-        ruleId: 'RUG-001',
-        message: `Tool "${tool.name}" description changed since first approval. ` +
-          `Previous: "${pinned.description.slice(0, 80)}..." → ` +
-          `Current: "${tool.description.slice(0, 80)}..."`,
+        ruleId: isBoilingFrog ? 'RUG-002' : 'RUG-001',
+        message: isBoilingFrog
+          ? `Tool "${tool.name}" has changed ${changeCount} times since original approval (gradual drift). ` +
+            `Original: "${pinned.originalDescription.slice(0, 60)}..." → ` +
+            `Current: "${tool.description.slice(0, 60)}..."`
+          : `Tool "${tool.name}" description changed since ${changeCount === 1 ? 'first approval' : 'last check'}. ` +
+            `Previous: "${pinned.description.slice(0, 80)}..." → ` +
+            `Current: "${tool.description.slice(0, 80)}..."`,
         severity: 'critical',
         category: 'rug-pull',
-        confidence: 0.98,
+        confidence: isBoilingFrog ? 1.0 : 0.98,
         metadata: {
           toolName: tool.name,
           previousHash: pinned.hash,
           currentHash: hash,
           previousDescription: pinned.description,
           currentDescription: tool.description,
+          originalHash: pinned.originalHash,
+          originalDescription: pinned.originalDescription,
+          changeCount,
         },
       });
     }

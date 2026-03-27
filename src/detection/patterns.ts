@@ -247,7 +247,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     id: 'EXF-001',
     name: 'url_data_exfil',
     description: 'Data exfiltration via URL embedding',
-    pattern: /(?:https?:\/\/)[^\s/]+\/[^\s]*(?:callback|exfil|steal|leak|send|upload|collect)[^\s]*/i,
+    pattern: /(?:https?:\/\/)[^\s/]+\/[^\s]*(?:exfil|steal|leak|upload|collect)[^\s]*/i,
     category: 'data-exfiltration',
     severity: 'high',
     confidence: 0.75,

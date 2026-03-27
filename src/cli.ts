@@ -19,7 +19,7 @@ import { HashPinChecker } from './integrity/hash-pin.js';
 import { MemoryHashStore } from './integrity/store.js';
 import { PolicyEngine } from './policy/engine.js';
 import { AuditLoggerImpl } from './audit/logger.js';
-import { SqliteAuditStore } from './audit/storage.js';
+import { SqliteAuditStore, getOrCreateHmacKey } from './audit/storage.js';
 import { toSarif, sarifToJson } from './audit/sarif.js';
 import { ALL_PATTERNS } from './detection/patterns.js';
 import { ALL_SECRET_PATTERNS } from './detection/secrets.js';
@@ -33,7 +33,7 @@ const program = new Command();
 program
   .name('mcp-fence')
   .description('The bidirectional firewall for MCP')
-  .version('0.1.1');
+  .version('0.2.0');
 
 // ─── start command ───
 
@@ -81,7 +81,7 @@ program
 
     setLogLevel(config.log.level);
 
-    log.info(`mcp-fence v0.1.1 — mode: ${config.mode}`);
+    log.info(`mcp-fence v0.2.0 — mode: ${config.mode}`);
 
     const scanner = new DetectionEngine(config.detection);
     const hashPinChecker = new HashPinChecker(new MemoryHashStore());
@@ -93,7 +93,11 @@ program
     const { mkdirSync } = await import('node:fs');
     try { mkdirSync(dataDir, { recursive: true }); } catch {}
     const dbPath = resolve(dataDir, 'audit.db');
-    const auditStore = new SqliteAuditStore(dbPath);
+    const hmacKey = getOrCreateHmacKey(dataDir);
+    const auditStore = new SqliteAuditStore(dbPath, {
+      hmacKey,
+      maxDbSizeMb: config.log.maxDbSizeMb,
+    });
     const auditLogger = new AuditLoggerImpl(auditStore);
 
     const proxy = new McpProxy({
@@ -133,7 +137,7 @@ program
   .action((opts: { config?: string }) => {
     const config = loadConfig(opts.config);
 
-    process.stdout.write('mcp-fence v0.1.1\n\n');
+    process.stdout.write('mcp-fence v0.2.0\n\n');
     process.stdout.write(`Mode:              ${config.mode}\n`);
     process.stdout.write(`Log level:         ${config.log.level}\n`);
     process.stdout.write(`Warn threshold:    ${config.detection.warnThreshold}\n`);
@@ -198,7 +202,6 @@ program
       }
       content = readFileSync(filePath, 'utf-8');
     } else {
-      // Read from stdin
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) {
         chunks.push(chunk as Buffer);
@@ -230,6 +233,8 @@ program
         score: result.score,
         findings: JSON.stringify(result.findings),
         message: null,
+        hmac: null,
+        prev_hmac: null,
       }];
       process.stdout.write(sarifToJson(toSarif(events)) + '\n');
     } else {
@@ -307,6 +312,42 @@ program
         process.stdout.write(JSON.stringify(events, null, 2) + '\n');
       } else {
         printTable(events);
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+// ─── verify command ───
+
+program
+  .command('verify')
+  .description('Verify audit log HMAC chain integrity')
+  .option('--db <path>', 'Path to audit database')
+  .action((opts: { db?: string }) => {
+    const homeDir = process.env['HOME'] ?? process.env['USERPROFILE'] ?? process.cwd();
+    const dataDir = resolve(homeDir, '.mcp-fence');
+    const defaultDb = resolve(dataDir, 'audit.db');
+    const dbPath = opts.db ? resolve(process.cwd(), opts.db) : defaultDb;
+
+    if (!existsSync(dbPath)) {
+      log.error(`Audit database not found: ${dbPath}`);
+      process.exit(1);
+    }
+
+    const hmacKey = getOrCreateHmacKey(dataDir);
+    const store = new SqliteAuditStore(dbPath, { hmacKey });
+
+    try {
+      const result = store.verifyChain(hmacKey);
+      if (result.valid) {
+        process.stdout.write('Chain integrity: VALID\n');
+        process.stdout.write(`Events verified: ${store.count()}\n`);
+        process.exit(0);
+      } else {
+        process.stdout.write('Chain integrity: BROKEN\n');
+        process.stdout.write(`First broken event ID: ${result.brokenAt}\n`);
+        process.exit(1);
       }
     } finally {
       store.close();
