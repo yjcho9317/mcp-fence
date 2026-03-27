@@ -72,10 +72,13 @@ Your MCP server works exactly as before. mcp-fence just inspects traffic passing
 | **Rug-pull detection** | SHA-256 hash pinning of tool descriptions. Detects silent modification after initial approval |
 | **Policy engine** | Tool-level allow/deny rules with glob patterns and argument validation |
 | **Audit logging** | SQLite-backed event log with queryable CLI |
+| **Secret masking** | Secrets in audit logs are masked before storage -- the DB never contains plain-text credentials |
+| **HMAC hash chain** | Audit log tamper detection via HMAC-SHA256 chain with `verify` CLI command |
+| **DB size limits** | Automatic pruning when the audit database exceeds the configured size limit |
 | **SARIF output** | Export findings in SARIF format for GitHub Security tab integration |
 | **Zero-config defaults** | Monitor mode out of the box -- logs threats without blocking, so you never break a working setup |
 
-### Limitations (v0.1)
+### Limitations
 
 Detection is regex-based. It handles known patterns well but won't catch novel prompt injection via paraphrase or synonyms. ML-based semantic detection is planned for v0.4. Only stdio transport is supported; SSE and Streamable HTTP are coming in v0.3.
 
@@ -83,18 +86,18 @@ Detection is regex-based. It handles known patterns well but won't catch novel p
 
 ## OWASP MCP Top 10 Coverage
 
-| ID | Risk | v0.1 | How |
+| ID | Risk | v0.2 | How |
 |----|------|:----:|-----|
-| MCP01 | Token/Secret Exposure | Yes | Secret pattern detection in requests and responses |
+| MCP01 | Token/Secret Exposure | Yes | Secret pattern detection + audit log masking |
 | MCP02 | Tool Poisoning | Yes | Tool description hash pinning (rug-pull detection) |
 | MCP03 | Excessive Permissions | Yes | Policy engine with tool allow/deny + argument constraints |
 | MCP04 | Command Injection | Yes | Command injection patterns in detection engine |
-| MCP05 | Insecure Data Handling | -- | Planned for v0.2 |
-| MCP06 | Insufficient Logging | Yes | SQLite audit log + SARIF export |
+| MCP05 | Insecure Data Handling | Yes | Secret masking, HMAC integrity chain, DB size limits |
+| MCP06 | Insufficient Logging | Yes | SQLite audit log + SARIF export + HMAC tamper detection |
 | MCP07 | Insufficient Auth | Yes | Policy enforcement + tool-level access control |
-| MCP08 | Server Spoofing | -- | Planned for v0.2 |
-| MCP09 | Supply Chain Compromise | -- | Planned for v0.2 |
-| MCP10 | Context Injection | -- | Planned for v0.2 |
+| MCP08 | Server Spoofing | -- | Planned for v0.3 |
+| MCP09 | Supply Chain Compromise | -- | Planned for v0.3 |
+| MCP10 | Context Injection | -- | Planned for v0.3 |
 
 ---
 
@@ -190,6 +193,14 @@ mcp-fence logs --format sarif > audit.sarif
 mcp-fence logs --direction response --limit 50
 ```
 
+### `verify` -- Verify audit log integrity
+
+```bash
+mcp-fence verify
+```
+
+Checks the HMAC hash chain in the audit database. Reports whether the chain is intact or identifies the first tampered event.
+
 ### `status` -- Show config and capabilities
 
 ```bash
@@ -280,7 +291,7 @@ console.log(result.findings); // Finding[]
 | Version | Focus |
 |---------|-------|
 | **v0.1** | stdio proxy, bidirectional scanning, secret detection, hash pinning, policy engine, SQLite audit, SARIF, CLI |
-| **v0.2** | Audit log hardening (secret masking, HMAC integrity, DB size limits), shadow tool detection, Unicode normalization for arguments |
+| **v0.2** | Audit log hardening (secret masking, HMAC integrity, DB size limits, `verify` command), Unicode normalization for arguments |
 | **v0.3** | SSE + Streamable HTTP transport, JWT authentication, OPA policy server integration |
 | **v0.4** | ML-based semantic detection (embedding similarity), session-level multi-step analysis |
 | **v1.0** | Production-stable release |
