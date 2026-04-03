@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/mcp-fence)](https://www.npmjs.com/package/mcp-fence)
 [![license](https://img.shields.io/npm/l/mcp-fence)](./LICENSE)
 [![node](https://img.shields.io/node/v/mcp-fence)](https://nodejs.org/)
-[![OWASP MCP](https://img.shields.io/badge/OWASP%20MCP%20Top%2010-7%2F10-blue)](#owasp-mcp-top-10-coverage)
+[![OWASP MCP](https://img.shields.io/badge/OWASP%20MCP%20Top%2010-9%2F10-blue)](#owasp-mcp-top-10-coverage)
 
 ---
 
@@ -21,6 +21,8 @@ Most MCP security tools only inspect what goes **in** to a server. That misses h
 
 ## Quick Start
 
+### stdio (default)
+
 ```bash
 # Install globally
 npm install -g mcp-fence
@@ -33,6 +35,17 @@ Or run without installing:
 
 ```bash
 npx mcp-fence start -- npx @anthropic/mcp-server-filesystem /tmp
+```
+
+### SSE / Streamable HTTP
+
+```bash
+# Proxy a remote MCP server over SSE
+mcp-fence start --transport sse --upstream http://localhost:8080 --port 3000
+
+# Streamable HTTP with JWT authentication
+MCP_FENCE_JWT_SECRET=my-secret mcp-fence start \
+  --transport http --upstream http://localhost:8080 --port 3000
 ```
 
 That's it. mcp-fence sits between your MCP client and server, logging every suspicious finding to stderr and an SQLite audit trail at `~/.mcp-fence/audit.db`.
@@ -69,24 +82,32 @@ Your MCP server works exactly as before. mcp-fence just inspects traffic passing
 | **Bidirectional scanning** | Scans both client requests and server responses for threats |
 | **Prompt injection detection** | 20+ regex patterns covering instruction override, role hijacking, hidden instructions, multi-language attacks |
 | **Secret leak detection** | 25+ patterns for AWS keys, GitHub tokens, private keys, connection strings, and more |
-| **Rug-pull detection** | SHA-256 hash pinning of tool descriptions. Detects silent modification after initial approval |
+| **PII detection** | 7 patterns covering email, phone, SSN, credit card, IPv4, Korean resident ID (주민번호), Korean phone numbers |
+| **Rug-pull detection** | SHA-256 hash pinning of tool descriptions, persisted to SQLite. Detects silent modification after initial approval |
+| **Server schema pinning** | TOFU-based pinning of server tool schemas. Detects schema drift across restarts |
+| **Context budget** | Configurable max response size (bytes) with warn/truncate/block actions to prevent context window flooding |
 | **Policy engine** | Tool-level allow/deny rules with glob patterns and argument validation |
+| **OPA integration** | External policy decisions via Open Policy Agent with SSRF protection and fail-closed defaults |
+| **Data flow policies** | Cross-server session-level tool call tracking with from/to rules |
+| **JWT authentication** | HS256, RS256, and JWKS key rotation for SSE/HTTP transports. Secret via `MCP_FENCE_JWT_SECRET` env var |
+| **SSE + Streamable HTTP** | Full transport support beyond stdio -- proxy remote MCP servers over HTTP |
 | **Audit logging** | SQLite-backed event log with queryable CLI |
 | **Secret masking** | Secrets in audit logs are masked before storage -- the DB never contains plain-text credentials |
 | **HMAC hash chain** | Audit log tamper detection via HMAC-SHA256 chain with `verify` CLI command |
 | **DB size limits** | Automatic pruning when the audit database exceeds the configured size limit |
 | **SARIF output** | Export findings in SARIF format for GitHub Security tab integration |
+| **Remediation guidance** | Every finding includes actionable remediation advice |
 | **Zero-config defaults** | Monitor mode out of the box -- logs threats without blocking, so you never break a working setup |
 
 ### Limitations
 
-Detection is regex-based. It handles known patterns well but won't catch novel prompt injection via paraphrase or synonyms. ML-based semantic detection is planned for v0.4. Only stdio transport is supported; SSE and Streamable HTTP are coming in v0.3.
+Detection is regex-based. It handles known patterns well but won't catch novel prompt injection via paraphrase or synonyms. ML-based semantic detection is planned for v1.x.
 
 ---
 
 ## OWASP MCP Top 10 Coverage
 
-| ID | Risk | v0.2 | How |
+| ID | Risk | v1.0 | How |
 |----|------|:----:|-----|
 | MCP01 | Token/Secret Exposure | Yes | Secret pattern detection + audit log masking |
 | MCP02 | Tool Poisoning | Yes | Tool description hash pinning (rug-pull detection) |
@@ -94,10 +115,10 @@ Detection is regex-based. It handles known patterns well but won't catch novel p
 | MCP04 | Command Injection | Yes | Command injection patterns in detection engine |
 | MCP05 | Insecure Data Handling | Yes | Secret masking, HMAC integrity chain, DB size limits |
 | MCP06 | Insufficient Logging | Yes | SQLite audit log + SARIF export + HMAC tamper detection |
-| MCP07 | Insufficient Auth | Yes | Policy enforcement + tool-level access control |
-| MCP08 | Server Spoofing | -- | Planned for v0.3 |
-| MCP09 | Supply Chain Compromise | -- | Planned for v0.3 |
-| MCP10 | Context Injection | -- | Planned for v0.3 |
+| MCP07 | Insufficient Auth | Yes | JWT authentication (HS256/RS256/JWKS) for HTTP transports + policy enforcement |
+| MCP08 | Server Spoofing | Yes | Server schema TOFU pinning (SRV-001, SRV-002, SRV-003) |
+| MCP09 | Supply Chain Compromise | Partial | Runtime behavior inspection catches post-compromise exfiltration; no package-level verification |
+| MCP10 | Context Injection | Yes | Context budget (maxResponseBytes, warn/truncate/block) + bidirectional injection scanning |
 
 ---
 
@@ -136,11 +157,41 @@ policy:
           denyPattern: "^\\.env$|^/etc/"
     - tool: "write_*"
       action: deny
+  # opa:
+  #   enabled: true
+  #   url: "http://localhost:8181/v1/data/mcp/allow"
+  #   timeoutMs: 5000
+  #   failOpen: false
+
+# jwt:
+#   enabled: true
+#   audience: "mcp-fence"
+#   issuer: "my-auth-server"
+#   # secret comes from MCP_FENCE_JWT_SECRET env var
+#   # jwksUrl: "https://auth.example.com/.well-known/jwks.json"
+
+# dataFlow:
+#   enabled: true
+#   rules:
+#     - from: "read_file"
+#       to: "send_email"
+#       action: deny
+
+# contextBudget:
+#   enabled: true
+#   maxResponseBytes: 102400
+#   truncateAction: warn  # warn | truncate | block
 ```
 
 Config priority: **CLI flags > environment variables > YAML file > defaults**.
 
-Environment variables: `MCP_FENCE_MODE` (`monitor` | `enforce`), `MCP_FENCE_LOG_LEVEL` (`debug` | `info` | `warn` | `error`).
+Environment variables:
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `MCP_FENCE_MODE` | `monitor`, `enforce` | Operation mode |
+| `MCP_FENCE_LOG_LEVEL` | `debug`, `info`, `warn`, `error` | Log verbosity |
+| `MCP_FENCE_JWT_SECRET` | string | Shared secret for HS256 JWT authentication |
 
 ---
 
@@ -149,12 +200,30 @@ Environment variables: `MCP_FENCE_MODE` (`monitor` | `enforce`), `MCP_FENCE_LOG_
 ### `start` -- Run the security proxy
 
 ```bash
-# Basic usage
+# stdio (default) — spawns server as child process
 mcp-fence start -- npx @anthropic/mcp-server-filesystem /tmp
 
 # With options
 mcp-fence start --mode enforce --config ./fence.config.yaml -- node my-server.js
+
+# SSE transport — proxy a remote server
+mcp-fence start --transport sse --upstream http://localhost:8080 --port 3000
+
+# Streamable HTTP with JWKS authentication
+mcp-fence start --transport http --upstream http://localhost:8080 --jwks-url https://auth.example.com/.well-known/jwks.json
 ```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c, --config <path>` | | Path to config file |
+| `-m, --mode <mode>` | `monitor` | Operation mode: `monitor` or `enforce` |
+| `--log-level <level>` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `-t, --transport <type>` | `stdio` | Transport: `stdio`, `sse`, `http` |
+| `-p, --port <port>` | `3000` | Listen port for SSE/HTTP transport |
+| `-u, --upstream <url>` | | Upstream MCP server URL (required for `sse`/`http`) |
+| `--jwks-url <url>` | | JWKS endpoint for RS256 JWT key rotation |
 
 ### `init` -- Generate default config
 
@@ -216,9 +285,10 @@ mcp-fence status --config ./fence.config.yaml
                         mcp-fence
                   ┌─────────────────────┐
 [MCP Client] ──> │  1. Detection Engine │ ──> [MCP Server]
-             stdin│  2. Hash Pin Check   │stdout
-[MCP Client] <── │  3. Policy Engine    │ <── [MCP Server]
-                  │  4. Audit Logger     │
+          stdio / │  2. Hash Pin Check   │ stdio / SSE /
+          SSE /   │  3. Policy Engine    │ Streamable HTTP
+          HTTP    │  4. Context Budget   │
+[MCP Client] <── │  5. Audit Logger     │ <── [MCP Server]
                   └─────────────────────┘
                            │
                      [SQLite Audit DB]
@@ -227,11 +297,12 @@ mcp-fence status --config ./fence.config.yaml
 Every message flows through the same pipeline:
 
 1. **Intercept** -- Proxy captures the JSON-RPC message (request or response).
-2. **Detect** -- Detection engine runs injection, secret, and command-injection patterns against the message content.
-3. **Pin check** -- For `tools/list` responses, hash-pins tool descriptions and flags any changes.
-4. **Policy** -- Policy engine evaluates tool-level allow/deny rules and argument constraints.
-5. **Audit** -- Every scan result is logged to SQLite with timestamp, direction, decision, and findings.
-6. **Forward or block** -- In monitor mode, everything passes through (findings are logged). In enforce mode, messages exceeding the block threshold are rejected.
+2. **Detect** -- Detection engine runs injection, secret, PII, and command-injection patterns against the message content.
+3. **Pin check** -- For `tools/list` responses, hash-pins tool descriptions and schemas, flags any changes.
+4. **Policy** -- Policy engine evaluates tool-level allow/deny rules, argument constraints, OPA decisions, and data flow rules.
+5. **Context budget** -- For responses, checks size against configured limits and applies warn/truncate/block.
+6. **Audit** -- Every scan result is logged to SQLite with timestamp, direction, decision, and findings.
+7. **Forward or block** -- In monitor mode, everything passes through (findings are logged). In enforce mode, messages exceeding the block threshold are rejected.
 
 Modules are decoupled: detection doesn't import policy, audit doesn't import detection. The proxy orchestrates all communication between them through the `ScanResult` contract.
 
@@ -288,13 +359,14 @@ console.log(result.findings); // Finding[]
 
 ## Roadmap
 
-| Version | Focus |
-|---------|-------|
-| **v0.1** | stdio proxy, bidirectional scanning, secret detection, hash pinning, policy engine, SQLite audit, SARIF, CLI |
-| **v0.2** | Audit log hardening (secret masking, HMAC integrity, DB size limits, `verify` command), Unicode normalization for arguments |
-| **v0.3** | SSE + Streamable HTTP transport, JWT authentication, OPA policy server integration |
-| **v0.4** | ML-based semantic detection (embedding similarity), session-level multi-step analysis |
-| **v1.0** | Production-stable release |
+| Version | Focus | Status |
+|---------|-------|--------|
+| **v0.1** | stdio proxy, bidirectional scanning, secret detection, hash pinning, policy engine, SQLite audit, SARIF, CLI | Done |
+| **v0.2** | Audit log hardening (secret masking, HMAC integrity, DB size limits, `verify` command), Unicode normalization | Done |
+| **v0.3** | SSE + Streamable HTTP transport, JWT authentication, OPA integration, cross-server data flow policies | Done |
+| **v0.4** | Server schema TOFU pinning, context budget (maxResponseBytes), SQLite-persisted hash pins | Done |
+| **v1.0** | PII detection (7 patterns), remediation guidance, 9 security hardening fixes | Current |
+| **v1.x** | ML-based semantic detection (embedding similarity), session-level multi-step analysis | Planned |
 
 ---
 

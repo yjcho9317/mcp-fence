@@ -46,7 +46,8 @@ const opaConfigSchema = z.object({
   enabled: z.boolean().default(false),
   url: z.string().url(),
   timeoutMs: z.number().positive().default(5000),
-  failOpen: z.boolean().default(true),
+  failOpen: z.boolean().default(false),
+  allowPrivateNetwork: z.boolean().default(false),
 });
 
 const policyConfigSchema = z.object({

@@ -20,6 +20,9 @@ import { TransportError } from '../errors.js';
 
 const log = createLogger('transport:sse');
 
+/** Maximum allowed request body size in bytes (1 MB). */
+const MAX_REQUEST_BODY_BYTES = 1_048_576;
+
 /**
  * Connects to an upstream MCP server via SSE.
  * Opens a GET request to receive events and sends messages via POST.
@@ -242,10 +245,24 @@ export class SseServerTransport implements Transport {
    */
   handlePostMessage(req: IncomingMessage, res: ServerResponse): void {
     const chunks: Buffer[] = [];
+    let bodySize = 0;
+    let rejected = false;
 
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('data', (chunk: Buffer) => {
+      if (rejected) return;
+      bodySize += chunk.length;
+      if (bodySize > MAX_REQUEST_BODY_BYTES) {
+        rejected = true;
+        req.destroy();
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'payload_too_large' }));
+        return;
+      }
+      chunks.push(chunk);
+    });
 
     req.on('end', () => {
+      if (rejected) return;
       try {
         const body = Buffer.concat(chunks).toString('utf-8');
         const msg = parseJsonRpcMessage(body);

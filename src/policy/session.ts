@@ -9,15 +9,22 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('session');
 
+/** Maximum number of tool calls retained in session history. */
+const MAX_HISTORY_SIZE = 1000;
+
 export class SessionTracker {
   /** Ordered list of tool names called in this session */
   private toolHistory: string[] = [];
 
   /**
-   * Record a tool call.
+   * Record a tool call. Evicts oldest entries when the history exceeds MAX_HISTORY_SIZE.
    */
   recordToolCall(toolName: string): void {
     this.toolHistory.push(toolName);
+    if (this.toolHistory.length > MAX_HISTORY_SIZE) {
+      const excess = this.toolHistory.length - MAX_HISTORY_SIZE;
+      this.toolHistory.splice(0, excess);
+    }
     log.debug(`Session tool history: [${this.toolHistory.join(', ')}]`);
   }
 

@@ -22,10 +22,16 @@ export interface SseEvent {
  * Parses an SSE stream from a Readable (e.g., HTTP response body).
  * Emits 'event' for each complete SSE event and 'close' when the stream ends.
  */
+/** Maximum accumulated event data size in bytes (1 MB). */
+const MAX_EVENT_DATA_BYTES = 1_048_576;
+/** Maximum event ID length in bytes. */
+const MAX_EVENT_ID_BYTES = 256;
+
 export class SseParser extends EventEmitter {
   private buffer = '';
   private eventType = 'message';
   private dataLines: string[] = [];
+  private dataSize = 0;
   private lastId: string | undefined;
 
   constructor(stream: Readable) {
@@ -102,10 +108,20 @@ export class SseParser extends EventEmitter {
         this.eventType = value;
         break;
       case 'data':
+        this.dataSize += Buffer.byteLength(value, 'utf-8');
+        if (this.dataSize > MAX_EVENT_DATA_BYTES) {
+          // Discard the oversized event and reset state
+          this.eventType = 'message';
+          this.dataLines = [];
+          this.dataSize = 0;
+          return;
+        }
         this.dataLines.push(value);
         break;
       case 'id':
-        this.lastId = value;
+        if (Buffer.byteLength(value, 'utf-8') <= MAX_EVENT_ID_BYTES) {
+          this.lastId = value;
+        }
         break;
       // 'retry' and unknown fields are ignored
     }
@@ -123,6 +139,7 @@ export class SseParser extends EventEmitter {
     // Reset for next event
     this.eventType = 'message';
     this.dataLines = [];
+    this.dataSize = 0;
   }
 }
 

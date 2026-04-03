@@ -28,6 +28,8 @@ export interface DetectionPattern {
   confidence: number;
   /** Which scan direction this pattern applies to */
   direction: 'request' | 'response' | 'both';
+  /** Guidance on how to fix the issue */
+  remediation?: string;
 }
 
 // ─── Prompt Injection Patterns ───
@@ -45,6 +47,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Review the tool arguments for instruction override attempts. If legitimate, add the tool to the policy allowlist.',
   },
   {
     id: 'INJ-002',
@@ -55,6 +58,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.8,
     direction: 'both',
+    remediation: 'Inspect tool output for role reassignment language. Block the tool or sanitize its output before passing to the AI agent.',
   },
   {
     id: 'INJ-003',
@@ -65,6 +69,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Check for fake system prompt markers in tool arguments or responses. Block the message and audit the originating tool.',
   },
   {
     id: 'INJ-004',
@@ -75,6 +80,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.85,
     direction: 'both',
+    remediation: 'Strip or escape XML-like role delimiters from tool arguments and responses before they reach the AI agent.',
   },
   {
     id: 'INJ-013',
@@ -85,6 +91,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.88,
     direction: 'both',
+    remediation: 'Remove LLM chat template markers from tool content. These tokens can hijack model behavior when passed through as text.',
   },
   {
     id: 'INJ-005',
@@ -95,6 +102,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.85,
     direction: 'both',
+    remediation: 'Strip visual boundary markers from tool content. Attackers use these to simulate instruction resets.',
   },
   {
     id: 'INJ-006',
@@ -105,6 +113,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Block the message immediately. DAN-style jailbreaks attempt to remove all safety guardrails from the AI agent.',
   },
   {
     id: 'INJ-007',
@@ -115,6 +124,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'medium',
     confidence: 0.7,
     direction: 'both',
+    remediation: 'Review if the tool output is attempting to dictate AI responses. Consider adding the tool to a restricted policy group.',
   },
   {
     id: 'INJ-008',
@@ -125,6 +135,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.92,
     direction: 'response',
+    remediation: 'Strip HTML comments from tool responses before passing to the AI agent. Hidden comments are a common injection vector.',
   },
   {
     id: 'INJ-009',
@@ -135,6 +146,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'medium',
     confidence: 0.65,
     direction: 'both',
+    remediation: 'Decode and inspect base64 content before allowing it through. Base64 encoding is used to bypass text-based detection.',
   },
   {
     id: 'INJ-010',
@@ -145,6 +157,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.75,
     direction: 'response',
+    remediation: 'Block tool responses that instruct the AI to invoke other tools. This is a tool-call injection targeting agent autonomy.',
   },
   {
     id: 'INJ-011',
@@ -155,6 +168,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.92,
     direction: 'both',
+    remediation: 'Block immediately. Persona switch attempts try to disable safety mechanisms in the AI agent.',
   },
   {
     id: 'INJ-012',
@@ -165,6 +179,7 @@ const injectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.8,
     direction: 'both',
+    remediation: 'Non-English instruction override detected. Apply the same blocking policy as English-language injection attempts.',
   },
 ];
 
@@ -184,6 +199,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'request',
+    remediation: 'Sanitize tool arguments by escaping shell metacharacters. Use allowlists for permitted commands instead of blocklists.',
   },
   {
     id: 'CMD-002',
@@ -194,6 +210,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.85,
     direction: 'request',
+    remediation: 'Reject arguments containing $() or backtick substitution. Pass arguments as array elements, not shell strings.',
   },
   {
     id: 'CMD-003',
@@ -204,6 +221,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.85,
     direction: 'request',
+    remediation: 'Resolve file paths to canonical form and verify they stay within the allowed directory. Use chroot or path allowlists.',
   },
   {
     id: 'CMD-004',
@@ -214,6 +232,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'request',
+    remediation: 'Deny access to sensitive system paths. Configure a file access allowlist in the MCP server and restrict to project directories.',
   },
   {
     id: 'CMD-005',
@@ -224,6 +243,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.88,
     direction: 'request',
+    remediation: 'Block pipe chains to network tools. If the MCP server needs outbound access, use a network allowlist.',
   },
   {
     id: 'CMD-006',
@@ -234,6 +254,7 @@ const commandInjectionPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'request',
+    remediation: 'Block immediately and alert. Reverse shell attempts indicate active exploitation. Audit all recent tool calls.',
   },
 ];
 
@@ -252,6 +273,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.75,
     direction: 'both',
+    remediation: 'Block URLs containing exfiltration keywords. Configure an outbound domain allowlist for the MCP server.',
   },
   {
     id: 'EXF-002',
@@ -262,6 +284,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.85,
     direction: 'response',
+    remediation: 'Strip or block markdown images with query parameters in tool responses. These can exfiltrate data via image load requests.',
   },
   {
     id: 'EXF-003',
@@ -272,6 +295,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.78,
     direction: 'both',
+    remediation: 'Block instructions that direct the AI to transmit data externally. Review the originating tool for injection vulnerabilities.',
   },
   {
     id: 'EXF-005',
@@ -282,6 +306,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.85,
     direction: 'response',
+    remediation: 'Sanitize HTML in tool responses. Remove img tags with query parameters that could encode sensitive data.',
   },
   {
     id: 'EXF-006',
@@ -292,6 +317,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.8,
     direction: 'response',
+    remediation: 'Strip markdown links with sensitive query parameters from tool responses before they reach the AI agent.',
   },
   {
     id: 'EXF-004',
@@ -302,6 +328,7 @@ const exfiltrationPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.82,
     direction: 'request',
+    remediation: 'Block DNS lookup tool arguments. DNS exfiltration encodes data in subdomain queries to bypass network controls.',
   },
 ];
 

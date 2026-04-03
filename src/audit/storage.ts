@@ -94,10 +94,14 @@ function computeHmac(
   decision: string,
   score: number,
   findings: string,
+  message: string,
 ): string {
-  const payload = `${prevHmac}|${timestamp}|${direction}|${decision}|${score}|${findings}`;
+  const payload = `${prevHmac}|${timestamp}|${direction}|${decision}|${score}|${findings}|${message}`;
   return createHmac('sha256', key).update(payload).digest('hex');
 }
+
+/** Method marker used in synthetic prune events to anchor the HMAC chain. */
+const PRUNE_MARKER_METHOD = '__mcp_fence_prune_marker';
 
 export class SqliteAuditStore implements AuditStore {
   private readonly db: Database.Database;
@@ -165,6 +169,7 @@ export class SqliteAuditStore implements AuditStore {
         event.decision,
         event.score,
         event.findings,
+        event.message ?? '',
       );
       this.lastHmac = hmac;
     }
@@ -206,14 +211,16 @@ export class SqliteAuditStore implements AuditStore {
    */
   verifyChain(hmacKey: string): ChainVerifyResult {
     const rows = this.db.prepare(
-      'SELECT id, timestamp, direction, decision, score, findings, hmac, prev_hmac FROM events ORDER BY id ASC',
+      'SELECT id, timestamp, direction, method, decision, score, findings, message, hmac, prev_hmac FROM events ORDER BY id ASC',
     ).all() as Array<{
       id: number;
       timestamp: number;
       direction: string;
+      method: string | null;
       decision: string;
       score: number;
       findings: string;
+      message: string | null;
       hmac: string | null;
       prev_hmac: string | null;
     }>;
@@ -222,11 +229,24 @@ export class SqliteAuditStore implements AuditStore {
 
     for (const row of rows) {
       if (row.hmac == null || row.prev_hmac == null) {
-        // Events inserted before HMAC was enabled are skipped
+        // Events inserted before HMAC was enabled are skipped (legacy)
         continue;
       }
 
+      // Prune markers reset the chain — their prev_hmac becomes the new anchor
+      if (row.method === PRUNE_MARKER_METHOD) {
+        expectedPrevHmac = row.prev_hmac;
+      }
+
       if (row.prev_hmac !== expectedPrevHmac) {
+        // Check if this is a legacy event (HMAC computed without message column).
+        // Legacy events use the old 6-field payload; try to verify with that format.
+        const legacyPayload = `${row.prev_hmac}|${row.timestamp}|${row.direction}|${row.decision}|${row.score}|${row.findings}`;
+        const legacyHmac = createHmac('sha256', hmacKey).update(legacyPayload).digest('hex');
+        if (row.hmac === legacyHmac) {
+          expectedPrevHmac = row.hmac;
+          continue;
+        }
         return { valid: false, brokenAt: row.id };
       }
 
@@ -238,9 +258,17 @@ export class SqliteAuditStore implements AuditStore {
         row.decision,
         row.score,
         row.findings,
+        row.message ?? '',
       );
 
       if (row.hmac !== expected) {
+        // Try legacy format (without message) for backward compatibility
+        const legacyPayload = `${row.prev_hmac}|${row.timestamp}|${row.direction}|${row.decision}|${row.score}|${row.findings}`;
+        const legacyHmac = createHmac('sha256', hmacKey).update(legacyPayload).digest('hex');
+        if (row.hmac === legacyHmac) {
+          expectedPrevHmac = row.hmac;
+          continue;
+        }
         return { valid: false, brokenAt: row.id };
       }
 
@@ -300,6 +328,24 @@ export class SqliteAuditStore implements AuditStore {
       this.db.prepare(
         'DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)',
       ).run(deleteCount);
+
+      // Find the HMAC of the last surviving event to anchor the prune marker.
+      const lastSurvivor = this.db.prepare(
+        'SELECT hmac FROM events WHERE hmac IS NOT NULL ORDER BY id DESC LIMIT 1',
+      ).get() as { hmac: string } | undefined;
+
+      // Reset the chain state so the prune marker links to the surviving chain.
+      this.lastHmac = lastSurvivor?.hmac ?? GENESIS_HMAC;
+
+      // Insert a prune marker event that re-anchors the HMAC chain after pruning.
+      this.insert({
+        timestamp: Date.now(),
+        direction: 'request',
+        method: PRUNE_MARKER_METHOD,
+        decision: 'allow',
+        score: 0,
+        findings: '[]',
+      });
 
       // Reclaim space
       this.db.pragma('wal_checkpoint(TRUNCATE)');

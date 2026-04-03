@@ -19,8 +19,10 @@ export interface OpaConfig {
   url: string;
   /** Request timeout in milliseconds (default: 5000) */
   timeoutMs?: number;
-  /** If OPA is unreachable, allow or deny? (default: true = allow) */
+  /** If OPA is unreachable, allow or deny? (default: false = deny) */
   failOpen?: boolean;
+  /** Allow OPA URLs pointing to private/loopback addresses. Defaults to false. */
+  allowPrivateNetwork?: boolean;
 }
 
 export interface OpaInput {
@@ -51,10 +53,16 @@ export async function queryOpa(
   input: OpaInput,
 ): Promise<OpaDecision> {
   const timeout = config.timeoutMs ?? 5000;
-  const failOpen = config.failOpen ?? true;
+  const failOpen = config.failOpen ?? false;
   const body = JSON.stringify({ input });
 
   const parsedUrl = new URL(config.url);
+
+  if (!config.allowPrivateNetwork && isPrivateUrl(parsedUrl)) {
+    log.warn(`OPA URL rejected — resolves to private/internal address: ${config.url}`);
+    return { allow: false, reason: 'OPA URL points to private/internal network' };
+  }
+
   const isHttps = parsedUrl.protocol === 'https:';
   const transport = isHttps ? https : http;
 
@@ -113,6 +121,45 @@ export async function queryOpa(
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Check whether a URL points to a private, loopback, or link-local address.
+ * Blocks SSRF attempts targeting internal services.
+ */
+function isPrivateUrl(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+
+  if (hostname === 'localhost' || hostname === '[::1]') {
+    return true;
+  }
+
+  // Strip IPv6 brackets if present
+  const bare = hostname.replace(/^\[|\]$/g, '');
+
+  // IPv6 loopback
+  if (bare === '::1') return true;
+
+  // IPv6 unique-local (fc00::/7)
+  if (/^f[cd][0-9a-f]{2}:/i.test(bare)) return true;
+
+  // IPv4 private/reserved ranges
+  const ipv4Match = bare.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    // 127.0.0.0/8
+    if (a === 127) return true;
+    // 10.0.0.0/8
+    if (a === 10) return true;
+    // 172.16.0.0/12
+    if (a === 172 && b! >= 16 && b! <= 31) return true;
+    // 192.168.0.0/16
+    if (a === 192 && b === 168) return true;
+    // 169.254.0.0/16 (link-local)
+    if (a === 169 && b === 254) return true;
+  }
+
+  return false;
 }
 
 /**

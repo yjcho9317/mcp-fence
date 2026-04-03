@@ -18,6 +18,7 @@ import type {
 } from '../types.js';
 import { getPatternsForDirection, type DetectionPattern } from './patterns.js';
 import { getSecretPatternsForDirection } from './secrets.js';
+import { getPiiPatternsForDirection } from './pii.js';
 import { buildScanResult } from './scorer.js';
 import { createLogger } from '../logger.js';
 
@@ -158,6 +159,7 @@ function matchPattern(pattern: DetectionPattern, text: string): Finding | null {
       severity: pattern.severity,
       category: pattern.category,
       confidence: pattern.confidence,
+      remediation: pattern.remediation,
       metadata: { patternName: pattern.name },
     };
   } catch {
@@ -265,6 +267,15 @@ export class DetectionEngine implements Scanner {
       if (finding) {
         findings.push(finding);
         log.debug(`Secret match: ${pattern.id} (${pattern.name}) — direction: ${direction}`);
+      }
+    }
+
+    const piiPatterns = getPiiPatternsForDirection(direction);
+    for (const pattern of piiPatterns) {
+      const finding = matchPattern(pattern, secretText);
+      if (finding) {
+        findings.push(finding);
+        log.debug(`PII match: ${pattern.id} (${pattern.name}) — direction: ${direction}`);
       }
     }
 

@@ -1,6 +1,6 @@
-# Threat Model — mcp-fence v0.2
+# Threat Model — mcp-fence v1.0
 
-**Last updated:** 2026-03-27
+**Last updated:** 2026-04-03
 **Author:** Security engineering team
 **Status:** Living document — updated with each release
 
@@ -8,7 +8,7 @@
 
 ## 1. System Overview
 
-mcp-fence is a bidirectional security proxy that sits between an MCP client (e.g., Claude Desktop, Cursor) and an MCP server. It intercepts all JSON-RPC messages on both the request and response paths, applies detection rules, enforces access policies, and produces an audit trail.
+mcp-fence is a bidirectional security proxy that sits between an MCP client (e.g., Claude Desktop, Cursor) and an MCP server. It intercepts all JSON-RPC messages on both the request and response paths, applies detection rules, enforces access policies, and produces an audit trail. It supports stdio, SSE, and Streamable HTTP transports with optional JWT authentication for network transports.
 
 ### Architecture
 
@@ -37,20 +37,22 @@ mcp-fence is a bidirectional security proxy that sits between an MCP client (e.g
 
 ### Data Flow
 
-1. Client sends JSON-RPC request via stdin.
-2. Proxy intercepts, extracts text content, runs detection engine (injection patterns, secret patterns, command injection patterns).
-3. Proxy checks tool-level policy (allow/deny rules from config).
-4. On `tools/list` responses, proxy computes SHA-256 hashes of tool descriptions and compares against pinned values to detect rug-pulls.
-5. Audit logger records the message and scan result to SQLite.
-6. Based on the decision (`allow`, `warn`, `block`) and the operation mode (`monitor` or `enforce`), the proxy either forwards or blocks the message.
-7. Server responses follow the same pipeline in reverse (steps 2, 5, 6).
+1. Client sends JSON-RPC request via stdio, SSE, or Streamable HTTP.
+2. For HTTP transports, JWT authentication is validated if configured.
+3. Proxy intercepts, extracts text content, runs detection engine (injection patterns, secret patterns, PII patterns, command injection patterns).
+4. Proxy checks tool-level policy (allow/deny rules from config, OPA decisions, data flow rules).
+5. On `tools/list` responses, proxy computes SHA-256 hashes of tool descriptions and schemas, compares against pinned values to detect rug-pulls and schema drift.
+6. For responses, context budget is checked against configured limits.
+7. Audit logger records the message and scan result to SQLite.
+8. Based on the decision (`allow`, `warn`, `block`) and the operation mode (`monitor` or `enforce`), the proxy either forwards or blocks the message.
+9. Server responses follow the same pipeline in reverse (steps 3, 7, 8).
 
 ### Trust Boundaries
 
 | Boundary | Description | Crosses |
 |----------|-------------|---------|
-| A: Client-Proxy | Between the LLM host process and mcp-fence | stdin/stdout pipes |
-| B: Proxy-Server | Between mcp-fence and the downstream MCP server | stdin/stdout pipes (child process) |
+| A: Client-Proxy | Between the LLM host process and mcp-fence | stdin/stdout pipes or HTTP |
+| B: Proxy-Server | Between mcp-fence and the downstream MCP server | stdin/stdout pipes (child process) or HTTP (upstream URL) |
 | C: Proxy-Filesystem | Between mcp-fence and local storage | SQLite DB, YAML config, SARIF output |
 
 ---
@@ -62,11 +64,14 @@ mcp-fence is a bidirectional security proxy that sits between an MCP client (e.g
 | MCP messages (requests) | Tool call arguments, user prompts, parameters | High | High | Medium |
 | MCP messages (responses) | Tool outputs, file contents, query results | High | High | Medium |
 | Tool descriptions | Metadata the LLM uses to decide tool selection | Medium | Critical | High |
+| Tool schemas | Input schema definitions pinned via TOFU | Medium | Critical | High |
 | Credentials in transit | API keys, tokens, passwords passing through the proxy | Critical | High | Low |
+| PII in transit | Email addresses, phone numbers, SSNs, credit cards | Critical | High | Low |
 | Audit database | SQLite file containing all intercepted messages and scan results | High | High | Medium |
 | SARIF reports | Exported security findings, potentially containing secret snippets | High | Medium | Low |
 | Config file | YAML with policy rules, thresholds, mode settings | Medium | High | Medium |
-| Hash pin store | In-memory map of tool description hashes | Low | Critical | Medium |
+| Hash pin store | SQLite-persisted tool description and schema hashes | Low | Critical | Medium |
+| JWT secrets | Shared secrets or JWKS keys for HTTP transport auth | Critical | Critical | High |
 
 ---
 
@@ -104,6 +109,14 @@ Targets the MCP server distribution chain rather than the protocol itself.
 **Motivation:** Wide-scale tool poisoning through a single compromised package.
 **Example:** A typosquatted npm package (`mcp-server-filesystm`) that includes data exfiltration in tool implementations.
 
+### 3.5 Network Attacker (HTTP transports)
+
+Targets the network communication between client and proxy, or proxy and upstream server.
+
+**Capabilities:** Can intercept, modify, or replay HTTP traffic if TLS is not enforced.
+**Motivation:** Session hijacking, credential theft, message manipulation.
+**Example:** MITM attack on an unencrypted SSE connection to inject malicious tool responses.
+
 ---
 
 ## 4. Attack Surface
@@ -111,12 +124,15 @@ Targets the MCP server distribution chain rather than the protocol itself.
 | Entry Point | Transport | Attacker Control | Validated By |
 |-------------|-----------|------------------|--------------|
 | Client request messages (stdin) | JSON-RPC over stdio | Partial (LLM-generated) | Detection engine, policy engine |
-| Server response messages (stdout) | JSON-RPC over stdio | Full (server controls) | Detection engine, hash-pin checker |
-| `tools/list` response metadata | JSON-RPC over stdio | Full (server controls) | Hash-pin integrity check |
+| Client request messages (HTTP) | JSON-RPC over SSE/HTTP | Partial (LLM-generated) | JWT auth, body size limits, detection engine, policy engine |
+| Server response messages (stdout) | JSON-RPC over stdio | Full (server controls) | Detection engine, hash-pin checker, context budget |
+| Server response messages (HTTP) | JSON-RPC over SSE/HTTP | Full (server controls) | SSE parser limits, detection engine, hash-pin checker, context budget |
+| `tools/list` response metadata | JSON-RPC over stdio/HTTP | Full (server controls) | Hash-pin integrity check, schema TOFU pinning |
 | Config file (`fence.config.yaml`) | Local filesystem | Requires FS access | Zod schema validation |
 | CLI arguments | Process args | Requires shell access | Commander parsing |
 | Audit database file | Local filesystem | Requires FS access | Parameterized SQL queries |
-| Environment variables | Process env | Requires env access | Not validated (config takes precedence) |
+| Environment variables | Process env | Requires env access | Validated for known vars (`MCP_FENCE_MODE`, `MCP_FENCE_JWT_SECRET`) |
+| OPA endpoint | HTTP | Network access | URL validation, SSRF protection (private network blocked by default), timeout enforcement |
 
 ---
 
@@ -126,49 +142,45 @@ Targets the MCP server distribution chain rather than the protocol itself.
 
 **Threat:** Sensitive credentials (API keys, tokens, passwords) leak through MCP tool arguments or responses. A tool reads `.env` or a config file and returns credentials to the LLM, which may include them in subsequent requests or display them to the user.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - 31 secret detection patterns covering AWS, GCP, Azure, GitHub, GitLab, Slack, Stripe, OpenAI, Anthropic, JWT, private keys, generic env vars, connection strings, and more.
-- Bidirectional scanning — secrets caught in both requests and responses.
+- 7 PII detection patterns (email, phone, SSN, credit card, IPv4, Korean resident ID, Korean phone).
+- Bidirectional scanning — secrets and PII caught in both requests and responses.
 - Text normalization (zero-width character stripping) before pattern matching.
 - Secret masking before audit storage — secrets >= 12 chars show first/last 4 chars with masked middle; shorter secrets are fully redacted. The audit DB never contains plain-text credentials.
+- All findings include remediation guidance.
 
 **Residual risk:**
 - Secrets in URL-encoded, HTML-entity-encoded, or base64-wrapped form bypass detection.
 - SARIF output also contains detected secrets verbatim.
 - No entropy check — placeholder keys (e.g., `AKIAIOSFODNN7EXAMPLE`) produce false positives.
-
-**Planned improvements:**
-- v0.3: Entropy scoring and example-key allowlists. Secret masking in SARIF export.
+- PII detection is regex-based and limited to the 7 patterns listed above.
 
 ### MCP02: Tool Poisoning
 
 **Threat:** Malicious instructions hidden in tool descriptions that manipulate LLM behavior during tool selection. The LLM processes these descriptions as trusted context and follows embedded directives.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - SHA-256 hash pinning of tool descriptions on first observation. Any subsequent change triggers a rug-pull finding with `critical` severity.
+- Hash pins persisted to SQLite — pins survive proxy restarts.
 - Detection engine scans tool descriptions for injection patterns (instruction override, role hijacking, delimiter injection, etc.).
 - Original descriptions are preserved alongside current pins, enabling drift detection across multiple changes.
 
 **Residual risk:**
 - First-time observation is trusted unconditionally — no way to verify a description is safe on first load.
-- Re-pinning on change means the boiling frog attack works: each incremental change is detected, but the baseline ratchets forward. The original description is not preserved.
-- Tool additions and removals between `tools/list` calls are not tracked. A new malicious tool is silently pinned.
-- In-memory hash store is lost on proxy restart. All pins reset.
 - In monitor mode (the default), rug-pull detections are logged but the poisoned description is still forwarded to the client.
-
-**Planned improvements:**
-- v0.2: Persist hash pins to SQLite. Store original descriptions separately from current pins. Track tool additions and removals. Block rug-pulls regardless of mode by default.
-- v0.3: User approval flow for re-pinning.
 
 ### MCP03: Excessive Permissions
 
 **Threat:** Tools operate with broader permissions than the user intended. A file-read tool that can access `/etc/shadow`, or a command execution tool that accepts arbitrary shell commands.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - Policy engine with per-tool allow/deny rules and glob matching (e.g., `read_*: allow`, `exec_cmd: deny`).
 - Argument constraints with `denyPattern` and `allowPattern` regex matching on tool arguments.
 - Tool name normalization (lowercase, whitespace strip, invisible character removal) to prevent casing and encoding bypasses.
 - Argument value normalization (URL decoding, invisible character stripping) before pattern matching.
+- OPA integration for external policy decisions with fail-closed defaults and SSRF protection.
+- Cross-server data flow policies to restrict tool call sequences (e.g., deny `read_file` -> `send_email`).
 
 **Residual risk:**
 - Argument validation is top-level only; nested objects within arguments are not inspected.
@@ -176,14 +188,11 @@ Targets the MCP server distribution chain rather than the protocol itself.
 - First-match-wins rule ordering can shadow later rules without warning.
 - Homoglyph tool names (Cyrillic lookalikes) bypass normalization.
 
-**Planned improvements:**
-- v0.2: Recursive argument validation, homoglyph normalization for tool names, rule shadowing warnings.
-
 ### MCP04: Command Injection
 
 **Threat:** Shell metacharacters or dangerous commands injected through tool arguments to achieve arbitrary code execution on the server or client host.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - 5 command injection patterns detecting shell metacharacters (`;`, `|`, `&&`, backticks, `$()`), dangerous commands (`curl`, `wget`, `nc`, `rm -rf`, etc.), and sensitive file access (`/etc/passwd`, `~/.ssh/`, etc.).
 - Pattern matching runs on flattened text extracted from all JSON-RPC fields.
 
@@ -193,126 +202,114 @@ Targets the MCP server distribution chain rather than the protocol itself.
 - Newline character as command separator is not in the metacharacter class.
 - Sensitive file list is incomplete. Missing: `~/.kube/config`, `~/.docker/config.json`, `~/.npmrc`.
 
-**Planned improvements:**
-- v0.2: Expanded command and file lists, absolute path handling, newline-aware metacharacter detection.
-
 ### MCP05: Insecure Data Handling
 
 **Threat:** Sensitive data improperly processed, stored, or transmitted by the proxy itself. The security tool becomes a liability.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - SQL injection fully mitigated via parameterized queries (prepared statements) in all database operations.
 - SARIF output uses structured JSON encoding, preventing injection through finding content.
 - Secret masking before storage -- secrets are replaced with masked values before writing to SQLite.
 - Database size limits with automatic pruning of oldest events when the configured threshold is exceeded (default 100 MB).
-- HMAC-SHA256 hash chain for audit log integrity with `verify` CLI command.
+- HMAC-SHA256 hash chain for audit log integrity with `verify` CLI command. HMAC covers the message column.
+- Body size limits on HTTP transports to prevent memory exhaustion.
+- SSE parser limits to prevent oversized event processing.
+- Session memory cap to bound per-session resource usage.
 
 **Residual risk:**
 - Database file permissions are not restricted on creation (world-readable by default).
 - No encryption at rest.
 - HMAC key is stored in plain text on the local filesystem (`~/.mcp-fence/hmac.key`). An attacker with file access can recompute valid HMACs after tampering.
 
-**Planned improvements:**
-- v0.3: DB file permission enforcement (0600), optional encryption at rest.
-
 ### MCP06: Insufficient Logging
 
 **Threat:** Security events go unrecorded, making incident response and forensics impossible.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - Every intercepted message is logged with timestamp, direction, method, tool name, decision, score, and findings.
 - SQLite storage with structured schema and queryable fields.
 - SARIF export for integration with GitHub Security tab and other SAST tools.
 - CLI `logs` command with filtering by time range, level, tool, and decision.
 - HMAC-SHA256 hash chain links each audit event to the previous one. The `verify` command walks the chain and reports the first tampered event if the chain is broken.
+- Pruning compatibility maintained across DB size limits.
 
 **Residual risk:**
 - HMAC key stored in plain text on local filesystem. An attacker with file access can forge valid chains.
-- Audit insert failures can cause unhandled rejections (crash potential).
 - No remote log shipping.
-
-**Planned improvements:**
-- v0.3: Remote syslog or webhook export, error handling for insert failures.
 
 ### MCP07: Insufficient Auth
 
 **Threat:** Unauthorized parties connect to the MCP server through the proxy, or the proxy itself lacks access controls.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
+- JWT authentication for SSE and Streamable HTTP transports. Supports HS256 (shared secret via `MCP_FENCE_JWT_SECRET` env var), RS256, and JWKS key rotation.
+- JWT secret is never accepted via CLI arguments — environment variable only, to prevent leaking in process listings.
 - Policy engine restricts which tools can be called and with what arguments, acting as an authorization layer for tool access.
-- The proxy itself runs as a local process communicating over stdio pipes — no network listener, no authentication surface.
+- For stdio transport, the proxy runs as a local process communicating over pipes — no network listener.
 
 **Residual risk:**
-- No authentication mechanism exists. Anyone with local access to the stdio pipes can send messages. This is acceptable for v0.2 (stdio-only), but becomes critical when network transports are added.
-- No client identity tracking — all messages are anonymous.
-
-**Planned improvements:**
-- v0.3: JWT authentication middleware (ships with SSE/HTTP transport support).
+- No client identity tracking beyond JWT claims — no per-user audit trails.
+- JWT is optional; deployments that skip configuration have no authentication on HTTP transports.
 
 ### MCP08: Server Spoofing/Shadowing
 
 **Threat:** A malicious MCP server registers tools with names that shadow or mimic tools from legitimate servers, intercepting calls intended for trusted servers.
 
-**Mitigation in v0.2:**
-- Not directly addressed. The proxy handles a single server per instance, so cross-server shadowing does not apply to the current architecture.
-- Hash pinning indirectly detects if a tool's description changes (which could indicate a spoofing attempt on a single-server setup).
+**Mitigation in v1.0:**
+- Server schema TOFU (Trust On First Use) pinning. On first observation, tool schemas are hashed and persisted to SQLite. Subsequent changes trigger findings:
+  - SRV-001: Tool description changed (rug-pull)
+  - SRV-002: Tool input schema changed (schema drift)
+  - SRV-003: Tool added or removed between `tools/list` calls
+- Hash pins persisted to SQLite — survive proxy restarts.
+- Hash pinning indirectly detects if a tool's description changes, which could indicate a spoofing attempt.
 
 **Residual risk:**
-- No multi-server awareness. When users run multiple proxied servers, there is no coordination or deconfliction between them.
-- Tool name collision detection does not exist.
-
-**Planned improvements:**
-- v0.2: Tool name conflict detection across config-defined server sets.
-- v0.3: Multi-server proxy mode with isolated policy scopes.
+- First-use trust means initial spoofing goes undetected.
+- No multi-server coordination — when users run multiple proxied servers, there is no cross-instance deconfliction.
+- Tool name collision detection across server instances does not exist.
 
 ### MCP09: Supply Chain Compromise
 
 **Threat:** The MCP server package itself is malicious — either through a direct attack on the package registry or through dependency confusion / typosquatting.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
 - Not directly addressed at the supply chain level. mcp-fence assumes the server binary is already present and focuses on runtime behavior inspection.
 - The detection engine catches some post-compromise behaviors (data exfiltration patterns, secret leaks, injection in responses).
+- Server schema pinning detects behavioral changes that may indicate a compromised update.
 
 **Residual risk:**
 - No package integrity verification, no signature checking, no known-malicious-server database.
 - A well-crafted supply chain attack that uses the tool legitimately but exfiltrates data server-side (before the response reaches the proxy) is invisible to mcp-fence.
 
-**Planned improvements:**
-- v0.2: Advisory integration (check server packages against known-malicious lists).
-- v0.3: Server-side behavior anomaly scoring (unusual network calls, unexpected file access).
-
 ### MCP10: Context Injection/Over-Sharing
 
 **Threat:** The LLM's context window is polluted with excessive or manipulative data, causing it to make poor decisions or leak information from one context into another.
 
-**Mitigation in v0.2:**
+**Mitigation in v1.0:**
+- Context budget enforcement via `contextBudget` config. Configurable `maxResponseBytes` with three actions: `warn` (log and forward), `truncate` (trim to limit), `block` (reject entirely).
 - Injection detection patterns catch many forms of context manipulation (instruction override, role hijacking, delimiter injection, few-shot injection).
-- Response scanning catches injected instructions in tool outputs.
+- Bidirectional scanning catches injected instructions in tool outputs.
 
 **Residual risk:**
-- No context budget enforcement — a tool can return arbitrarily large responses that dominate the context window.
 - No cross-message correlation — an attacker can gradually build up context pollution across multiple messages, each individually below detection thresholds.
 - Semantic paraphrases of injection patterns bypass regex detection.
-
-**Planned improvements:**
-- v0.2: Context budget limits (configurable max response size forwarded to client).
-- v0.4: Session-level correlation scoring, embedding-based semantic detection.
+- Context budget is byte-based, not token-based; actual token consumption depends on the model's tokenizer.
 
 ---
 
-## 6. Known Limitations (v0.2)
+## 6. Known Limitations (v1.0)
 
-This section documents what v0.2 does not handle. These are not bugs — they are scope boundaries.
+This section documents what v1.0 does not handle. These are not bugs — they are scope boundaries.
 
 ### 6.1 Regex-Only Detection
 
-All detection is pattern-based. The engine matches against a library of regular expressions. It has no semantic understanding of the text it scans. A paraphrased instruction ("disregard prior directives" instead of "ignore previous instructions") bypasses detection entirely. This is a fundamental limitation of regex-based approaches and is addressed by the ML detection roadmap in v0.4.
+All detection is pattern-based. The engine matches against a library of regular expressions. It has no semantic understanding of the text it scans. A paraphrased instruction ("disregard prior directives" instead of "ignore previous instructions") bypasses detection entirely. This is a fundamental limitation of regex-based approaches and is addressed by the ML detection roadmap in v1.x.
 
 ### 6.2 Multi-Language Coverage Gaps
 
 Injection pattern INJ-012 covers instruction override in 10 languages (English, Chinese, Korean, Japanese, French, German, Spanish, Russian, Portuguese, Italian). Other injection patterns (role hijacking, output manipulation, delimiter injection, etc.) are English-only. An attacker using Turkish, Arabic, Hindi, Vietnamese, or other uncovered languages for these patterns will bypass detection.
 
-Expanding regex to cover every language-pattern combination is not sustainable. The long-term solution is ML-based classification (v0.4) that operates on semantic embeddings rather than surface text.
+Expanding regex to cover every language-pattern combination is not sustainable. The long-term solution is ML-based classification (v1.x) that operates on semantic embeddings rather than surface text.
 
 ### 6.3 Head+Tail Scanning Blind Spot
 
@@ -320,27 +317,19 @@ Messages larger than `maxInputSize` (default 10KB) are scanned at the head and t
 
 ### 6.4 No Cross-Message Correlation
 
-Each message is evaluated independently. There is no session state, no cumulative scoring, no behavioral baseline. A multi-step attack where each individual message is clean (enumerate tools, read a credential file, exfiltrate the result) passes through without detection. Addressing this requires session-level analysis planned for v0.4.
+Each message is evaluated independently. There is no session state for detection purposes, no cumulative scoring, no behavioral baseline. A multi-step attack where each individual message is clean (enumerate tools, read a credential file, exfiltrate the result) passes through without detection. Data flow policies track tool call sequences but do not perform behavioral analysis. ML-based session-level analysis is planned for v1.x.
 
-### 6.5 In-Memory Hash Store
-
-Tool description hashes are stored in a `Map` in process memory. On proxy restart, all pins are lost. A server that changes descriptions between proxy restarts will never trigger a rug-pull finding. Persistence to SQLite is planned for v0.2.
-
-### 6.6 ~~Secrets Stored in Plain Text in Audit Logs~~ (Fixed in v0.2)
-
-Resolved. Secrets are now masked before storage. Secrets >= 12 characters show the first and last 4 characters with the middle replaced by asterisks; shorter secrets are fully redacted as `[REDACTED]`.
-
-### 6.7 stdio Transport Only
-
-v0.2 supports only stdio-based MCP communication (the proxy spawns the server as a child process). SSE and Streamable HTTP transports are not supported. Servers that communicate over HTTP are out of scope until v0.3.
-
-### 6.8 Predictable Scoring
+### 6.5 Predictable Scoring
 
 The scoring algorithm is deterministic and documented. An attacker who knows the pattern set and scoring weights can pre-calculate the exact score for any payload and craft inputs that stay just below the block threshold. Adding randomization or server-side entropy to scoring is under consideration.
 
-### 6.9 ReDoS Mitigation is Post-Hoc
+### 6.6 ReDoS Mitigation is Post-Hoc
 
-The `PATTERN_TIMEOUT_MS` check measures execution time after a regex completes. JavaScript's `RegExp.test()` is synchronous and cannot be interrupted mid-execution. A pathological input blocks the event loop for the full regex execution time. The check logs a warning but cannot prevent the blocking. All known ReDoS patterns in v0.1 have been fixed, but new patterns could reintroduce the issue. Moving to a linear-time regex engine (RE2) is under consideration for v0.4.
+The `PATTERN_TIMEOUT_MS` check measures execution time after a regex completes. JavaScript's `RegExp.test()` is synchronous and cannot be interrupted mid-execution. A pathological input blocks the event loop for the full regex execution time. The check logs a warning but cannot prevent the blocking. All known ReDoS patterns in v0.1 have been fixed, but new patterns could reintroduce the issue. Moving to a linear-time regex engine (RE2) is under consideration for a future release.
+
+### 6.7 First-Use Trust
+
+Both tool description hash pinning and server schema TOFU pinning trust the first observation unconditionally. A server that is malicious from the start will have its malicious descriptions and schemas pinned as the baseline. TOFU only detects changes after initial pinning.
 
 ---
 
@@ -348,14 +337,14 @@ The `PATTERN_TIMEOUT_MS` check measures execution time after a regex completes. 
 
 ### Test Suite
 
-mcp-fence v0.2 ships with **1,159 tests** covering:
+mcp-fence v1.0 ships with **1,340 tests** covering:
 
 | Category | Tests | Description |
 |----------|------:|-------------|
-| Unit tests | ~550 | Module-level tests for detection, policy, integrity, audit, config, proxy |
-| Integration tests | ~80 | End-to-end pipeline tests covering the full message flow |
-| QA tests | ~185 | Functional correctness across all detection patterns and policy rules |
-| Security (adversarial) | ~320 | Deliberately adversarial inputs: bypass attempts, ReDoS, scoring abuse, secret evasion, hash-pin manipulation |
+| Unit tests | ~600 | Module-level tests for detection, policy, integrity, audit, config, proxy, PII, transports |
+| Integration tests | ~100 | End-to-end pipeline tests covering the full message flow across all transports |
+| QA tests | ~200 | Functional correctness across all detection patterns, policy rules, and PII patterns |
+| Security (adversarial) | ~440 | Deliberately adversarial inputs: bypass attempts, ReDoS, scoring abuse, secret evasion, hash-pin manipulation, SSRF, JWT attacks |
 
 ### Adversarial Test Coverage
 
@@ -366,21 +355,24 @@ The security test suite was written as a red-team exercise. Key areas tested:
 - **SQL injection** against all string fields in the audit storage layer. Fully mitigated.
 - **Hash-pin manipulation** including gradual drift, prototype pollution, store exhaustion, and normalization bypasses.
 - **Secret detection evasion** including encoding, fragmentation, and homoglyph techniques.
+- **JWT authentication attacks** including expired tokens, invalid signatures, algorithm confusion.
+- **SSRF protection** for OPA endpoint validation.
+- **Transport-level attacks** including oversized bodies, SSE parser abuse, and session memory exhaustion.
 
 ### Assessment Cycle
 
-Four assessment rounds were conducted (W2, W3, W4, W5-W7), each consisting of QA functional testing followed by adversarial red-team testing. All critical and high-severity findings from each round were remediated before the next round. Remaining items are tracked in the version roadmap.
+Multiple assessment rounds were conducted across v0.1 through v1.0, each consisting of QA functional testing followed by adversarial red-team testing. All critical and high-severity findings from each round were remediated before the next round. Remaining items are tracked in the version roadmap.
 
 ### Findings Summary (across all assessments)
 
-| Severity | Found | Fixed in v0.1 | Fixed in v0.2 | Deferred |
-|----------|------:|------:|------:|------:|
-| Critical | 2 | 2 | 0 | 0 |
-| High | 11 | 7 | 2 | 2 |
-| Medium | 18 | 5 | 0 | 13 |
-| Low | 5 | 0 | 0 | 5 |
+| Severity | Found | Fixed | Deferred |
+|----------|------:|------:|------:|
+| Critical | 2 | 2 | 0 |
+| High | 11 | 9 | 2 |
+| Medium | 18 | 5 | 13 |
+| Low | 5 | 0 | 5 |
 
-Of the 4 previously deferred high-severity items, 2 are fixed in v0.2: audit log secret exposure (masking) and audit log integrity (HMAC chain). The remaining 2 are deferred: head+tail scanning blind spot and argument URL/unicode encoding bypass.
+The remaining 2 deferred high-severity items are: head+tail scanning blind spot and argument URL/unicode encoding bypass.
 
 ---
 

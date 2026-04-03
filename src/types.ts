@@ -55,6 +55,8 @@ export interface Finding {
   category: FindingCategory;
   /** Confidence score 0.0 ~ 1.0 */
   confidence: number;
+  /** Guidance on how to fix the issue */
+  remediation?: string;
   /** Additional metadata */
   metadata?: Record<string, unknown>;
 }
@@ -149,8 +151,10 @@ export interface OpaConfig {
   url: string;
   /** Request timeout in milliseconds (default: 5000) */
   timeoutMs?: number;
-  /** If OPA is unreachable, allow or deny? (default: true = allow) */
+  /** If OPA is unreachable, allow or deny? (default: false = deny) */
   failOpen?: boolean;
+  /** Allow OPA URLs pointing to private/loopback addresses. Defaults to false. */
+  allowPrivateNetwork?: boolean;
 }
 
 export interface DataFlowRule {

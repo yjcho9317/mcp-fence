@@ -17,13 +17,14 @@ import { StdioRunner } from './server/runner-stdio.js';
 import { HttpRunner, type HttpTransportMode } from './server/runner-http.js';
 import { DetectionEngine } from './detection/engine.js';
 import { HashPinChecker } from './integrity/hash-pin.js';
-import { MemoryHashStore } from './integrity/store.js';
+import { SqliteHashStore } from './integrity/sqlite-store.js';
 import { PolicyEngine } from './policy/engine.js';
 import { AuditLoggerImpl } from './audit/logger.js';
 import { SqliteAuditStore, getOrCreateHmacKey } from './audit/storage.js';
 import { toSarif, sarifToJson } from './audit/sarif.js';
 import { ALL_PATTERNS } from './detection/patterns.js';
 import { ALL_SECRET_PATTERNS } from './detection/secrets.js';
+import { ALL_PII_PATTERNS } from './detection/pii.js';
 import { loadConfig, generateDefaultConfigYaml } from './config.js';
 import { setLogLevel, createLogger } from './logger.js';
 
@@ -34,7 +35,7 @@ const program = new Command();
 program
   .name('mcp-fence')
   .description('The bidirectional firewall for MCP')
-  .version('0.4.0');
+  .version('1.0.0');
 
 // ─── start command ───
 
@@ -47,7 +48,6 @@ program
   .option('-t, --transport <type>', 'Transport type: stdio, sse, http', 'stdio')
   .option('-p, --port <port>', 'Port for HTTP/SSE transport', '3000')
   .option('-u, --upstream <url>', 'Upstream MCP server URL (for sse/http transport)')
-  .option('--jwt-secret <secret>', 'JWT shared secret for HS256 authentication')
   .option('--jwks-url <url>', 'JWKS URL for RS256 JWT authentication')
   .allowUnknownOption(false)
   .action(async (opts: {
@@ -57,7 +57,6 @@ program
     transport?: string;
     port?: string;
     upstream?: string;
-    jwtSecret?: string;
     jwksUrl?: string;
   }, cmd: Command) => {
     const transport = opts.transport ?? 'stdio';
@@ -106,18 +105,21 @@ program
 
     setLogLevel(config.log.level);
 
-    log.info(`mcp-fence v0.4.0 — mode: ${config.mode}`);
+    log.info(`mcp-fence v1.0.0 — mode: ${config.mode}`);
 
-    const scanner = new DetectionEngine(config.detection);
-    const hashPinChecker = new HashPinChecker(new MemoryHashStore());
-    const policyEngine = new PolicyEngine(config.policy);
-
-    // Audit logging — SQLite database in ~/.mcp-fence/
+    // Data directory — shared by audit DB and hash pin store
     const homeDir = process.env['HOME'] ?? process.env['USERPROFILE'] ?? process.cwd();
     const dataDir = resolve(homeDir, '.mcp-fence');
     const { mkdirSync } = await import('node:fs');
     try { mkdirSync(dataDir, { recursive: true }); } catch {}
     const dbPath = resolve(dataDir, 'audit.db');
+
+    const scanner = new DetectionEngine(config.detection);
+    const hashStore = new SqliteHashStore(dbPath);
+    const hashPinChecker = new HashPinChecker(hashStore);
+    const policyEngine = new PolicyEngine(config.policy);
+
+    // Audit logging — HMAC-chained SQLite store
     const hmacKey = getOrCreateHmacKey(dataDir);
     const auditStore = new SqliteAuditStore(dbPath, {
       hmacKey,
@@ -125,12 +127,14 @@ program
     });
     const auditLogger = new AuditLoggerImpl(auditStore);
 
-    // Build JWT config from CLI flags or config file
+    // Build JWT config from CLI flags, env vars, or config file.
+    // JWT secret comes from MCP_FENCE_JWT_SECRET env var (never CLI args).
     let jwtConfig = config.jwt;
-    if (opts.jwtSecret) {
-      jwtConfig = { enabled: true, secret: opts.jwtSecret, ...jwtConfig, };
+    const jwtSecretEnv = process.env['MCP_FENCE_JWT_SECRET'];
+    if (jwtSecretEnv) {
+      jwtConfig = { enabled: true, secret: jwtSecretEnv, ...jwtConfig };
       jwtConfig.enabled = true;
-      jwtConfig.secret = opts.jwtSecret;
+      jwtConfig.secret = jwtSecretEnv;
     }
     if (opts.jwksUrl) {
       jwtConfig = { enabled: true, jwksUrl: opts.jwksUrl, ...jwtConfig };
@@ -154,6 +158,7 @@ program
       const handleShutdown = () => {
         httpRunner.shutdown();
         auditStore.close();
+        hashStore.close();
         process.exit(0);
       };
 
@@ -180,6 +185,7 @@ program
       const handleShutdown = () => {
         runner.shutdown();
         auditStore.close();
+        hashStore.close();
         process.exit(0);
       };
 
@@ -204,7 +210,7 @@ program
   .action((opts: { config?: string }) => {
     const config = loadConfig(opts.config);
 
-    process.stdout.write('mcp-fence v0.4.0\n\n');
+    process.stdout.write('mcp-fence v1.0.0\n\n');
     process.stdout.write(`Mode:              ${config.mode}\n`);
     process.stdout.write(`Log level:         ${config.log.level}\n`);
     process.stdout.write(`Warn threshold:    ${config.detection.warnThreshold}\n`);
@@ -221,7 +227,7 @@ program
       }
     }
 
-    process.stdout.write(`\nDetection patterns: ${ALL_PATTERNS.length} injection + ${ALL_SECRET_PATTERNS.length} secret\n`);
+    process.stdout.write(`\nDetection patterns: ${ALL_PATTERNS.length} injection + ${ALL_SECRET_PATTERNS.length} secret + ${ALL_PII_PATTERNS.length} PII\n`);
   });
 
 // ─── init command ───
@@ -314,6 +320,9 @@ program
         process.stdout.write(`Findings:\n`);
         for (const f of result.findings) {
           process.stdout.write(`  [${f.severity.toUpperCase()}] ${f.ruleId}: ${f.message}\n`);
+          if (f.remediation) {
+            process.stdout.write(`    → ${f.remediation}\n`);
+          }
         }
       }
     }

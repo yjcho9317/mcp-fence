@@ -68,7 +68,7 @@ describe('queryOpa — successful responses', () => {
       res.end(JSON.stringify({ result: true }));
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'read_file', direction: 'request' });
     expect(decision.allow).toBe(true);
   });
@@ -79,7 +79,7 @@ describe('queryOpa — successful responses', () => {
       res.end(JSON.stringify({ result: false }));
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
   });
@@ -90,7 +90,7 @@ describe('queryOpa — successful responses', () => {
       res.end(JSON.stringify({ result: { allow: true, reason: 'whitelisted tool' } }));
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'read_file', direction: 'request' });
     expect(decision.allow).toBe(true);
     expect(decision.reason).toBe('whitelisted tool');
@@ -102,7 +102,7 @@ describe('queryOpa — successful responses', () => {
       res.end(JSON.stringify({ result: { allow: false, reason: 'unauthorized tool' } }));
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
     expect(decision.reason).toBe('unauthorized tool');
@@ -120,7 +120,7 @@ describe('queryOpa — successful responses', () => {
       });
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     await queryOpa(config, { tool: 'read_file', args: { path: '/tmp' }, direction: 'request' });
 
     const parsed = JSON.parse(receivedBody);
@@ -141,6 +141,7 @@ describe('queryOpa — error handling', () => {
       url: mockServer.url,
       timeoutMs: 100,
       failOpen: true,
+      allowPrivateNetwork: true,
     };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(true);
@@ -157,6 +158,7 @@ describe('queryOpa — error handling', () => {
       url: mockServer.url,
       timeoutMs: 100,
       failOpen: false,
+      allowPrivateNetwork: true,
     };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
@@ -169,6 +171,7 @@ describe('queryOpa — error handling', () => {
       url: 'http://127.0.0.1:19999/v1/data/mcp/allow',
       timeoutMs: 500,
       failOpen: true,
+      allowPrivateNetwork: true,
     };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(true);
@@ -181,6 +184,7 @@ describe('queryOpa — error handling', () => {
       url: 'http://127.0.0.1:19999/v1/data/mcp/allow',
       timeoutMs: 500,
       failOpen: false,
+      allowPrivateNetwork: true,
     };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
@@ -193,7 +197,7 @@ describe('queryOpa — error handling', () => {
       res.end('Internal Server Error');
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: true };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: true, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(true);
     expect(decision.reason).toContain('status 500');
@@ -205,7 +209,7 @@ describe('queryOpa — error handling', () => {
       res.end('Not Found');
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: false };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: false, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
     expect(decision.reason).toContain('status 404');
@@ -217,7 +221,7 @@ describe('queryOpa — error handling', () => {
       res.end('not json at all');
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: true };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, failOpen: true, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(true);
     expect(decision.reason).toContain('parse');
@@ -229,7 +233,7 @@ describe('queryOpa — error handling', () => {
       res.end(JSON.stringify({}));
     });
 
-    const config: OpaConfig = { enabled: true, url: mockServer.url };
+    const config: OpaConfig = { enabled: true, url: mockServer.url, allowPrivateNetwork: true };
     const decision = await queryOpa(config, { tool: 'exec_cmd', direction: 'request' });
     expect(decision.allow).toBe(false);
     expect(decision.reason).toContain('no decision');
@@ -248,7 +252,7 @@ describe('PolicyEngine with OPA integration', () => {
     const config: PolicyConfig = {
       defaultAction: 'allow',
       rules: [{ tool: 'exec_cmd', action: 'deny' }],
-      opa: { enabled: true, url: mockServer.url },
+      opa: { enabled: true, url: mockServer.url, allowPrivateNetwork: true },
     };
     const engine = new PolicyEngine(config);
     const findings = await engine.evaluate(toolsCall('exec_cmd'));
@@ -264,7 +268,7 @@ describe('PolicyEngine with OPA integration', () => {
     const config: PolicyConfig = {
       defaultAction: 'allow',
       rules: [{ tool: 'read_file', action: 'allow' }],
-      opa: { enabled: true, url: mockServer.url },
+      opa: { enabled: true, url: mockServer.url, allowPrivateNetwork: true },
     };
     const engine = new PolicyEngine(config);
     const findings = await engine.evaluate(toolsCall('read_file'));
@@ -283,7 +287,7 @@ describe('PolicyEngine with OPA integration', () => {
     const config: PolicyConfig = {
       defaultAction: 'allow',
       rules: [],
-      opa: { enabled: true, url: mockServer.url },
+      opa: { enabled: true, url: mockServer.url, allowPrivateNetwork: true },
     };
     const engine = new PolicyEngine(config);
     const findings = await engine.evaluate(toolsCall('any_tool'));
@@ -300,6 +304,7 @@ describe('PolicyEngine with OPA integration', () => {
         url: 'http://127.0.0.1:19999/v1/data/mcp/allow',
         timeoutMs: 100,
         failOpen: true,
+        allowPrivateNetwork: true,
       },
     };
     const engine = new PolicyEngine(config);
@@ -317,6 +322,7 @@ describe('PolicyEngine with OPA integration', () => {
         url: 'http://127.0.0.1:19999/v1/data/mcp/allow',
         timeoutMs: 100,
         failOpen: false,
+        allowPrivateNetwork: true,
       },
     };
     const engine = new PolicyEngine(config);
@@ -337,7 +343,7 @@ describe('PolicyEngine with OPA integration', () => {
     const config: PolicyConfig = {
       defaultAction: 'deny',
       rules: [],
-      opa: { enabled: true, url: mockServer.url },
+      opa: { enabled: true, url: mockServer.url, allowPrivateNetwork: true },
     };
     const engine = new PolicyEngine(config);
     const listMsg: JsonRpcMessage = {

@@ -22,6 +22,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Rotate the exposed AWS key immediately. Use environment variables or IAM roles instead of hardcoding credentials.',
   },
   {
     id: 'SEC-002',
@@ -32,6 +33,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.7,
     direction: 'both',
+    remediation: 'Rotate the exposed AWS secret key immediately. Store secrets in a vault or secrets manager, not in code or tool output.',
   },
   {
     id: 'SEC-003',
@@ -42,6 +44,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'response',
+    remediation: 'Remove the service account key file from tool-accessible paths. Use workload identity or mounted secrets instead.',
   },
   {
     id: 'SEC-004',
@@ -52,6 +55,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Rotate the Azure connection string. Use managed identities or Azure Key Vault for credential management.',
   },
 
   // ─── API Tokens ───
@@ -64,6 +68,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Revoke the GitHub token immediately at github.com/settings/tokens. Use short-lived tokens with minimal scopes.',
   },
   {
     id: 'SEC-011',
@@ -74,6 +79,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Revoke the GitLab token in user settings. Use project-scoped or group-scoped tokens with expiration dates.',
   },
   {
     id: 'SEC-012',
@@ -84,6 +90,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Regenerate the Slack token in your Slack app settings. Store tokens in environment variables, not in code.',
   },
   {
     id: 'SEC-013',
@@ -94,6 +101,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Roll the Stripe API key in the Stripe dashboard. Use restricted keys with minimum required permissions.',
   },
   {
     id: 'SEC-014',
@@ -104,6 +112,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.85,
     direction: 'both',
+    remediation: 'Revoke the OpenAI key at platform.openai.com/api-keys. Use environment variables and rotate keys regularly.',
   },
   {
     id: 'SEC-015',
@@ -114,6 +123,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Revoke the Anthropic key in the console. Use environment variables and restrict key access to production services only.',
   },
 
   // ─── Authentication Credentials ───
@@ -126,6 +136,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Do not pass JWTs through tool responses. Use short-lived tokens and ensure the MCP server strips auth headers from output.',
   },
   {
     id: 'SEC-021',
@@ -136,6 +147,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.98,
     direction: 'both',
+    remediation: 'Remove private key files from tool-accessible directories. Use a secrets manager or hardware security module for key storage.',
   },
   {
     id: 'SEC-022',
@@ -146,6 +158,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.75,
     direction: 'both',
+    remediation: 'Remove hardcoded passwords. Use a secrets manager and inject credentials at runtime via environment variables.',
   },
   {
     id: 'SEC-023',
@@ -156,6 +169,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Rotate database credentials. Store connection strings in a secrets manager and restrict MCP server access to database config files.',
   },
   {
     id: 'SEC-024',
@@ -166,6 +180,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.8,
     direction: 'both',
+    remediation: 'Strip Authorization headers from tool output. Ensure MCP servers do not expose bearer tokens in responses.',
   },
 
   // ─── Additional Provider Tokens ───
@@ -178,6 +193,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Regenerate the DigitalOcean token. Use scoped tokens with the minimum permissions required.',
   },
   {
     id: 'SEC-017',
@@ -188,6 +204,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Revoke the SendGrid key and create a new one with restricted permissions. Use environment variables for storage.',
   },
   {
     id: 'SEC-018',
@@ -198,6 +215,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.95,
     direction: 'both',
+    remediation: 'Revoke the npm token with `npm token revoke`. Use granular access tokens with read-only or publish-only scopes.',
   },
   {
     id: 'SEC-019',
@@ -208,6 +226,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Remove and regenerate the PyPI token. Use project-scoped tokens and configure trusted publishers where possible.',
   },
   {
     id: 'SEC-025',
@@ -218,6 +237,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'critical',
     confidence: 0.9,
     direction: 'both',
+    remediation: 'Regenerate the Vercel token in account settings. Use project-level environment variables for deployments.',
   },
   {
     id: 'SEC-026',
@@ -228,6 +248,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.85,
     direction: 'both',
+    remediation: 'Restrict the Google API key to specific APIs and referrers. Regenerate if exposed and apply API key restrictions.',
   },
   {
     id: 'SEC-027',
@@ -238,6 +259,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.75,
     direction: 'both',
+    remediation: 'Remove SSH URLs from tool output. Use SSH config files with key-based auth instead of connection strings with credentials.',
   },
 
   // ─── Generic Secrets ───
@@ -250,6 +272,7 @@ const secretPatterns: DetectionPattern[] = [
     severity: 'high',
     confidence: 0.7,
     direction: 'both',
+    remediation: 'Move API keys to environment variables or a secrets manager. Never store credentials in source code or configuration files.',
   },
   {
     id: 'SEC-031',

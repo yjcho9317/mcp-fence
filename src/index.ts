@@ -24,6 +24,7 @@ export type { AuthResult } from './auth/middleware.js';
 export { loadConfig, generateDefaultConfigYaml, DEFAULT_CONFIG } from './config.js';
 export { createLogger, setLogLevel } from './logger.js';
 export { DetectionEngine } from './detection/engine.js';
+export { ALL_PII_PATTERNS, getPiiPatternsForDirection } from './detection/pii.js';
 export { checkContextBudget } from './detection/context-budget.js';
 export type { BudgetResult } from './detection/context-budget.js';
 export { HashPinChecker } from './integrity/hash-pin.js';
