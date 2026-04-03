@@ -24,9 +24,11 @@ export type { AuthResult } from './auth/middleware.js';
 export { loadConfig, generateDefaultConfigYaml, DEFAULT_CONFIG } from './config.js';
 export { createLogger, setLogLevel } from './logger.js';
 export { DetectionEngine } from './detection/engine.js';
+export { checkContextBudget } from './detection/context-budget.js';
+export type { BudgetResult } from './detection/context-budget.js';
 export { HashPinChecker } from './integrity/hash-pin.js';
 export { MemoryHashStore } from './integrity/store.js';
-export type { HashStore, PinnedTool } from './integrity/store.js';
+export type { HashStore, PinnedTool, ServerPin } from './integrity/store.js';
 export { PolicyEngine } from './policy/engine.js';
 export { evaluatePolicy } from './policy/local.js';
 export { AuditLoggerImpl } from './audit/logger.js';
@@ -56,4 +58,5 @@ export type {
   PolicyRule,
   ArgConstraint,
   JwtConfig as JwtConfigType,
+  ContextBudgetConfig,
 } from './types.js';

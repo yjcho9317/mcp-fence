@@ -20,6 +20,15 @@ export interface PinnedTool {
   changeCount: number;
 }
 
+export interface ServerPin {
+  /** SHA-256 hash of the full server schema (sorted tools, descriptions, inputSchemas) */
+  schemaHash: string;
+  /** Tool names present when the pin was created */
+  toolNames: string[];
+  /** Timestamp of when this pin was created */
+  pinnedAt: number;
+}
+
 export interface HashStore {
   /** Get the pinned hash for a tool. Returns null if not pinned. */
   get(toolName: string): PinnedTool | null;
@@ -31,6 +40,10 @@ export interface HashStore {
   getAll(): PinnedTool[];
   /** Clear all pinned hashes (for testing or reset). */
   clear(): void;
+  /** Get the stored server-level schema pin. */
+  getServerPin(): ServerPin | null;
+  /** Store a server-level schema pin. Returns false if a pin already existed with a different hash. */
+  setServerPin(pin: ServerPin): boolean;
 }
 
 /**
@@ -38,6 +51,7 @@ export interface HashStore {
  */
 export class MemoryHashStore implements HashStore {
   private readonly store = new Map<string, PinnedTool>();
+  private serverPin: ServerPin | null = null;
 
   get(toolName: string): PinnedTool | null {
     return this.store.get(toolName) ?? null;
@@ -88,5 +102,27 @@ export class MemoryHashStore implements HashStore {
 
   clear(): void {
     this.store.clear();
+    this.serverPin = null;
+  }
+
+  getServerPin(): ServerPin | null {
+    return this.serverPin;
+  }
+
+  setServerPin(pin: ServerPin): boolean {
+    if (this.serverPin !== null && this.serverPin.schemaHash !== pin.schemaHash) {
+      log.warn(
+        `Server schema changed: pinned=${this.serverPin.schemaHash.slice(0, 8)}... ` +
+        `new=${pin.schemaHash.slice(0, 8)}...`,
+      );
+      this.serverPin = pin;
+      return false;
+    }
+
+    if (this.serverPin === null) {
+      this.serverPin = pin;
+      log.debug(`Pinned server schema: ${pin.schemaHash.slice(0, 12)}...`);
+    }
+    return true;
   }
 }

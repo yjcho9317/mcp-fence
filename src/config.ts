@@ -74,6 +74,13 @@ const jwtConfigSchema = z.object({
   issuer: z.string().optional(),
 });
 
+const contextBudgetConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  maxResponseTokens: z.number().positive().default(10000),
+  maxResponseBytes: z.number().positive().default(102400),
+  truncateAction: z.enum(['warn', 'truncate', 'block']).default('warn'),
+});
+
 const fenceConfigSchema = z.object({
   mode: z.enum(['monitor', 'enforce']).default('monitor'),
   log: logConfigSchema.default({}),
@@ -81,6 +88,7 @@ const fenceConfigSchema = z.object({
   policy: policyConfigSchema.default({}),
   jwt: jwtConfigSchema.optional(),
   dataFlow: dataFlowConfigSchema.optional(),
+  contextBudget: contextBudgetConfigSchema.optional(),
 });
 
 export const DEFAULT_CONFIG: FenceConfig = {

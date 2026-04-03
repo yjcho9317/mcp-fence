@@ -114,6 +114,17 @@ export interface JwtConfig {
   issuer?: string;
 }
 
+export interface ContextBudgetConfig {
+  /** Whether context budget checking is enabled */
+  enabled: boolean;
+  /** Maximum response size in estimated tokens (default: 10000) */
+  maxResponseTokens?: number;
+  /** Maximum response size in bytes (default: 102400 = 100KB) */
+  maxResponseBytes?: number;
+  /** Action when budget is exceeded */
+  truncateAction: 'warn' | 'truncate' | 'block';
+}
+
 export interface FenceConfig {
   /** Operation mode: monitor (log only) or enforce (block) */
   mode: OperationMode;
@@ -127,6 +138,8 @@ export interface FenceConfig {
   jwt?: JwtConfig;
   /** Cross-server data flow policies */
   dataFlow?: DataFlowConfig;
+  /** Context budget limits for server responses */
+  contextBudget?: ContextBudgetConfig;
 }
 
 export interface OpaConfig {

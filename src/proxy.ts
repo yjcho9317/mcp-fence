@@ -19,6 +19,7 @@ import { HashPinChecker } from './integrity/hash-pin.js';
 import { PolicyEngine } from './policy/engine.js';
 import { SessionTracker } from './policy/session.js';
 import { evaluateDataFlow } from './policy/data-flow.js';
+import { checkContextBudget } from './detection/context-budget.js';
 import { ProxyError } from './errors.js';
 import { createLogger } from './logger.js';
 
@@ -191,7 +192,8 @@ export class McpProxy {
   /**
    * Handle a message from the MCP server (response direction).
    */
-  private async handleServerMessage(message: JsonRpcMessage): Promise<void> {
+  private async handleServerMessage(originalMessage: JsonRpcMessage): Promise<void> {
+    let message = originalMessage;
     const hasResult = 'result' in message;
     const hasError = 'error' in message;
     log.debug(`← Server message: ${hasResult ? 'result' : hasError ? 'error' : 'notification'}`);
@@ -209,6 +211,32 @@ export class McpProxy {
         // Recalculate decision: rug-pull findings are always critical
         result.decision = 'block';
         result.score = Math.max(result.score, 0.98);
+      }
+
+      // Server-level schema pinning (TOFU)
+      const serverSchemaFindings = this.options.hashPinChecker.checkServerSchema(message);
+      if (serverSchemaFindings.length > 0) {
+        result.findings.push(...serverSchemaFindings);
+        result.decision = 'block';
+        result.score = Math.max(result.score, 0.95);
+      }
+    }
+
+    // Context budget check
+    const budgetConfig = this.options.config.contextBudget;
+    if (budgetConfig?.enabled) {
+      const budgetResult = checkContextBudget(message, budgetConfig);
+      if (budgetResult.exceeded && budgetResult.finding) {
+        result.findings.push(budgetResult.finding);
+
+        if (budgetConfig.truncateAction === 'block') {
+          result.decision = 'block';
+          result.score = Math.max(result.score, 0.9);
+        } else if (budgetConfig.truncateAction === 'truncate' && budgetResult.truncatedMessage) {
+          // Replace message with truncated version and forward
+          message = budgetResult.truncatedMessage;
+        }
+        // 'warn' action: finding is added but message passes through unchanged
       }
     }
 

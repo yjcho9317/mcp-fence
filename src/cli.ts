@@ -34,7 +34,7 @@ const program = new Command();
 program
   .name('mcp-fence')
   .description('The bidirectional firewall for MCP')
-  .version('0.3.0');
+  .version('0.4.0');
 
 // ─── start command ───
 
@@ -106,7 +106,7 @@ program
 
     setLogLevel(config.log.level);
 
-    log.info(`mcp-fence v0.3.0 — mode: ${config.mode}`);
+    log.info(`mcp-fence v0.4.0 — mode: ${config.mode}`);
 
     const scanner = new DetectionEngine(config.detection);
     const hashPinChecker = new HashPinChecker(new MemoryHashStore());
@@ -204,7 +204,7 @@ program
   .action((opts: { config?: string }) => {
     const config = loadConfig(opts.config);
 
-    process.stdout.write('mcp-fence v0.3.0\n\n');
+    process.stdout.write('mcp-fence v0.4.0\n\n');
     process.stdout.write(`Mode:              ${config.mode}\n`);
     process.stdout.write(`Log level:         ${config.log.level}\n`);
     process.stdout.write(`Warn threshold:    ${config.detection.warnThreshold}\n`);
