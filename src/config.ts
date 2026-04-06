@@ -140,7 +140,7 @@ export function loadConfig(configPath?: string): FenceConfig {
  */
 export function generateDefaultConfigYaml(): string {
   return `# mcp-fence configuration
-# Docs: https://github.com/user/mcp-fence
+# Docs: https://github.com/yjcho9317/mcp-fence
 
 # Operation mode: "monitor" (log only) or "enforce" (block threats)
 mode: monitor

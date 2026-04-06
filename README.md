@@ -80,8 +80,8 @@ Your MCP server works exactly as before. mcp-fence just inspects traffic passing
 | Feature | Description |
 |---------|-------------|
 | **Bidirectional scanning** | Scans both client requests and server responses for threats |
-| **Prompt injection detection** | 20+ regex patterns covering instruction override, role hijacking, hidden instructions, multi-language attacks |
-| **Secret leak detection** | 25+ patterns for AWS keys, GitHub tokens, private keys, connection strings, and more |
+| **Prompt injection detection** | 25 regex patterns (13 injection + 6 command injection + 6 exfiltration) covering instruction override, role hijacking, hidden instructions, multi-language attacks |
+| **Secret leak detection** | 24 patterns for AWS keys, GitHub tokens, private keys, connection strings, and more |
 | **PII detection** | 7 patterns covering email, phone, SSN, credit card, IPv4, Korean resident ID (주민번호), Korean phone numbers |
 | **Rug-pull detection** | SHA-256 hash pinning of tool descriptions, persisted to SQLite. Detects silent modification after initial approval |
 | **Server schema pinning** | TOFU-based pinning of server tool schemas. Detects schema drift across restarts |
@@ -119,6 +119,8 @@ Detection is regex-based. It handles known patterns well but won't catch novel p
 | MCP08 | Server Spoofing | Yes | Server schema TOFU pinning (SRV-001, SRV-002, SRV-003) |
 | MCP09 | Supply Chain Compromise | Partial | Runtime behavior inspection catches post-compromise exfiltration; no package-level verification |
 | MCP10 | Context Injection | Yes | Context budget (maxResponseBytes, warn/truncate/block) + bidirectional injection scanning |
+
+**CVE coverage:** Tested against 44 known MCP vulnerabilities (16 specific CVEs) across 86 attack scenarios with 86% detection rate (38/44). The remaining 14% are server-implementation flaws and infrastructure-level issues outside proxy scope.
 
 ---
 
@@ -375,7 +377,7 @@ console.log(result.findings); // Finding[]
 Contributions are welcome. Please open an issue before submitting large changes so we can discuss the approach.
 
 ```bash
-git clone https://github.com/user/mcp-fence.git
+git clone https://github.com/yjcho9317/mcp-fence.git
 cd mcp-fence
 npm install
 npm test          # run tests

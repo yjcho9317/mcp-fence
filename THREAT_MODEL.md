@@ -1,7 +1,7 @@
 # Threat Model — mcp-fence v1.0
 
 **Last updated:** 2026-04-03
-**Author:** Security engineering team
+**Author:** yjcho
 **Status:** Living document — updated with each release
 
 ---
@@ -143,7 +143,7 @@ Targets the network communication between client and proxy, or proxy and upstrea
 **Threat:** Sensitive credentials (API keys, tokens, passwords) leak through MCP tool arguments or responses. A tool reads `.env` or a config file and returns credentials to the LLM, which may include them in subsequent requests or display them to the user.
 
 **Mitigation in v1.0:**
-- 31 secret detection patterns covering AWS, GCP, Azure, GitHub, GitLab, Slack, Stripe, OpenAI, Anthropic, JWT, private keys, generic env vars, connection strings, and more.
+- 24 secret detection patterns covering AWS, GCP, Azure, GitHub, GitLab, Slack, Stripe, OpenAI, Anthropic, JWT, private keys, generic env vars, connection strings, and more.
 - 7 PII detection patterns (email, phone, SSN, credit card, IPv4, Korean resident ID, Korean phone).
 - Bidirectional scanning — secrets and PII caught in both requests and responses.
 - Text normalization (zero-width character stripping) before pattern matching.
@@ -193,14 +193,12 @@ Targets the network communication between client and proxy, or proxy and upstrea
 **Threat:** Shell metacharacters or dangerous commands injected through tool arguments to achieve arbitrary code execution on the server or client host.
 
 **Mitigation in v1.0:**
-- 5 command injection patterns detecting shell metacharacters (`;`, `|`, `&&`, backticks, `$()`), dangerous commands (`curl`, `wget`, `nc`, `rm -rf`, etc.), and sensitive file access (`/etc/passwd`, `~/.ssh/`, etc.).
+- 6 command injection patterns detecting shell metacharacters (`;`, `|`, `&&`, backticks, `$()`), dangerous commands (`curl`, `wget`, `nc`, `rm -rf`, etc.), sensitive file access (`/etc/passwd`, `~/.ssh/`, etc.), pipe chains, and reverse shell patterns.
 - Pattern matching runs on flattened text extracted from all JSON-RPC fields.
 
 **Residual risk:**
-- Command list is incomplete. Missing: `chmod`, `chown`, `dd`, `powershell`, `cmd.exe`, `socat`, `xargs`, `awk`, `sed`.
+- Command list covers common dangerous commands but does not include every possible tool (e.g., `awk`, `sed`).
 - Absolute path prefix (`/usr/bin/curl`) bypasses patterns expecting the bare command name after a metacharacter.
-- Newline character as command separator is not in the metacharacter class.
-- Sensitive file list is incomplete. Missing: `~/.kube/config`, `~/.docker/config.json`, `~/.npmrc`.
 
 ### MCP05: Insecure Data Handling
 
@@ -257,9 +255,9 @@ Targets the network communication between client and proxy, or proxy and upstrea
 
 **Mitigation in v1.0:**
 - Server schema TOFU (Trust On First Use) pinning. On first observation, tool schemas are hashed and persisted to SQLite. Subsequent changes trigger findings:
-  - SRV-001: Tool description changed (rug-pull)
-  - SRV-002: Tool input schema changed (schema drift)
-  - SRV-003: Tool added or removed between `tools/list` calls
+  - SRV-001: Tool description or schema changed (rug-pull / schema drift)
+  - SRV-002: New tool appeared that was not in the original server schema
+  - SRV-003: Tool disappeared from the server schema
 - Hash pins persisted to SQLite — survive proxy restarts.
 - Hash pinning indirectly detects if a tool's description changes, which could indicate a spoofing attempt.
 
@@ -337,20 +335,20 @@ Both tool description hash pinning and server schema TOFU pinning trust the firs
 
 ### Test Suite
 
-mcp-fence v1.0 ships with **1,340 tests** covering:
+mcp-fence v1.0 ships with **1,426 tests** covering:
 
 | Category | Tests | Description |
 |----------|------:|-------------|
-| Unit tests | ~600 | Module-level tests for detection, policy, integrity, audit, config, proxy, PII, transports |
+| Unit tests | ~500 | Module-level tests for detection, policy, integrity, audit, config, proxy, PII, transports |
 | Integration tests | ~100 | End-to-end pipeline tests covering the full message flow across all transports |
 | QA tests | ~200 | Functional correctness across all detection patterns, policy rules, and PII patterns |
-| Security (adversarial) | ~440 | Deliberately adversarial inputs: bypass attempts, ReDoS, scoring abuse, secret evasion, hash-pin manipulation, SSRF, JWT attacks |
+| Security (adversarial) | 630 | Deliberately adversarial inputs: bypass attempts, ReDoS, scoring abuse, secret evasion, hash-pin manipulation, SSRF, JWT attacks |
 
 ### Adversarial Test Coverage
 
 The security test suite was written as a red-team exercise. Key areas tested:
 
-- **12 evasion technique categories** against all 22 injection patterns (homoglyphs, zero-width chars, encoding, case mixing, whitespace manipulation, comment insertion, nesting, chunking, synonyms, multilingual, padding, combination attacks).
+- **12 evasion technique categories** against all 25 injection patterns (13 INJ + 6 CMD + 6 EXF) (homoglyphs, zero-width chars, encoding, case mixing, whitespace manipulation, comment insertion, nesting, chunking, synonyms, multilingual, padding, combination attacks).
 - **ReDoS testing** against all patterns with 5KB and 10KB adversarial inputs. All previously identified ReDoS vulnerabilities (INJ-003, SEC-004, SEC-014) have been fixed.
 - **SQL injection** against all string fields in the audit storage layer. Fully mitigated.
 - **Hash-pin manipulation** including gradual drift, prototype pollution, store exhaustion, and normalization bypasses.
@@ -382,7 +380,7 @@ If you discover a security vulnerability in mcp-fence, please report it responsi
 
 **Do not** open a public GitHub issue for security vulnerabilities.
 
-**Email:** security@mcp-fence.dev (or the maintainer's email listed in `package.json`)
+**Report via:** https://github.com/yjcho9317/mcp-fence/issues (use a private security advisory if available, or contact the maintainer listed in `package.json`)
 
 **What to include:**
 - Description of the vulnerability

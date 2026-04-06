@@ -5,6 +5,4 @@ tmp/
 .env
 *.key
 *.db
-*.zip
-*.tgz
 .DS_Store
