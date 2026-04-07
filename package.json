@@ -1,6 +1,6 @@
 {
   "name": "mcp-fence",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "The bidirectional firewall for MCP — scans inputs AND outputs, detects rug-pulls at runtime, zero config.",
   "type": "module",
   "main": "./dist/index.js",

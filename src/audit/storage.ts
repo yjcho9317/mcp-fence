@@ -233,9 +233,18 @@ export class SqliteAuditStore implements AuditStore {
         continue;
       }
 
-      // Prune markers reset the chain — their prev_hmac becomes the new anchor
+      // Prune markers reset the chain — verify the marker's own HMAC first,
+      // then use it as the new anchor
       if (row.method === PRUNE_MARKER_METHOD) {
-        expectedPrevHmac = row.prev_hmac;
+        const markerHmac = computeHmac(
+          hmacKey, row.prev_hmac, row.timestamp, row.direction,
+          row.decision, row.score, row.findings, row.message ?? '',
+        );
+        if (row.hmac !== markerHmac) {
+          return { valid: false, brokenAt: row.id };
+        }
+        expectedPrevHmac = row.hmac;
+        continue;
       }
 
       if (row.prev_hmac !== expectedPrevHmac) {

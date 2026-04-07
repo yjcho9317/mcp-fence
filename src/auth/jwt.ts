@@ -31,9 +31,8 @@ export interface JwtPayload {
   [key: string]: unknown;
 }
 
-let jwksCache: jose.JSONWebKeySet | null = null;
-let jwksCacheTime = 0;
-const JWKS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+let cachedJwksUrl: string | null = null;
+let cachedJwks: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
 
 /**
  * Verify a JWT token against the provided configuration.
@@ -80,18 +79,18 @@ async function verifyWithJwks(
   jwksUrl: string,
   options: jose.JWTVerifyOptions,
 ): Promise<JwtPayload> {
-  const jwks = jose.createRemoteJWKSet(new URL(jwksUrl));
-  const { payload } = await jose.jwtVerify(token, jwks, {
+  if (cachedJwksUrl !== jwksUrl) {
+    cachedJwks = jose.createRemoteJWKSet(new URL(jwksUrl));
+    cachedJwksUrl = jwksUrl;
+  }
+  const { payload } = await jose.jwtVerify(token, cachedJwks!, {
     ...options,
     algorithms: ['RS256'],
   });
   return payload as JwtPayload;
 }
 
-/**
- * Reset the JWKS cache. Useful for testing.
- */
 export function resetJwksCache(): void {
-  jwksCache = null;
-  jwksCacheTime = 0;
+  cachedJwks = null;
+  cachedJwksUrl = null;
 }

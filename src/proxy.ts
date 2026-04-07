@@ -164,7 +164,6 @@ export class McpProxy {
           result.score = Math.max(result.score, 0.95);
         }
       }
-      this.sessionTracker.recordToolCall(toolName);
     }
 
     // Audit log
@@ -184,6 +183,11 @@ export class McpProxy {
 
     if (result.decision === 'warn') {
       log.warn(`WARNING in request: ${result.findings.map((f) => f.ruleId).join(', ')}`);
+    }
+
+    // Record tool call AFTER forward decision — blocked calls don't enter history
+    if (toolName) {
+      this.sessionTracker.recordToolCall(toolName);
     }
 
     this.serverTransport.send(message);

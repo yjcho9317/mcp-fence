@@ -255,27 +255,37 @@ export class DetectionEngine implements Scanner {
       }
     }
 
-    // Secret patterns run on text with only invisible characters stripped.
+    // Secret/PII patterns run on text with only invisible characters stripped.
     // Full normalization (homoglyphs, NFKD) would break secret prefixes like AKIA, ghp_.
     const strippedText = originalText.replace(/[\u200B-\u200F\u2060-\u206F\u00AD\uFEFF\u034F]/g, '');
-    const secretText = strippedText.length > this.config.maxInputSize
-      ? strippedText.slice(0, this.config.maxInputSize)
-      : strippedText;
+    let secretHead = strippedText;
+    let secretTail = '';
+    if (strippedText.length > this.config.maxInputSize) {
+      const halfSize = Math.floor(this.config.maxInputSize / 2);
+      secretHead = strippedText.slice(0, halfSize);
+      secretTail = strippedText.slice(-halfSize);
+    }
 
-    for (const pattern of secretPatterns) {
-      const finding = matchPattern(pattern, secretText);
+    const allSecretPii = [...secretPatterns, ...getPiiPatternsForDirection(direction)];
+    const secretRuleIds = new Set<string>();
+
+    for (const pattern of allSecretPii) {
+      const finding = matchPattern(pattern, secretHead);
       if (finding) {
         findings.push(finding);
-        log.debug(`Secret match: ${pattern.id} (${pattern.name}) — direction: ${direction}`);
+        secretRuleIds.add(finding.ruleId);
+        log.debug(`Secret/PII match: ${pattern.id} (${pattern.name}) — direction: ${direction}`);
       }
     }
 
-    const piiPatterns = getPiiPatternsForDirection(direction);
-    for (const pattern of piiPatterns) {
-      const finding = matchPattern(pattern, secretText);
-      if (finding) {
-        findings.push(finding);
-        log.debug(`PII match: ${pattern.id} (${pattern.name}) — direction: ${direction}`);
+    if (secretTail.length > 0) {
+      for (const pattern of allSecretPii) {
+        if (secretRuleIds.has(pattern.id)) continue;
+        const finding = matchPattern(pattern, secretTail);
+        if (finding) {
+          findings.push(finding);
+          log.debug(`Secret/PII match (tail): ${pattern.id} (${pattern.name}) — direction: ${direction}`);
+        }
       }
     }
 

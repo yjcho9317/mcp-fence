@@ -35,7 +35,7 @@ const program = new Command();
 program
   .name('mcp-fence')
   .description('The bidirectional firewall for MCP')
-  .version('1.0.0');
+  .version('1.0.1');
 
 // ─── start command ───
 
@@ -43,8 +43,8 @@ program
   .command('start')
   .description('Start the MCP security proxy')
   .option('-c, --config <path>', 'Path to config file')
-  .option('-m, --mode <mode>', 'Operation mode: monitor or enforce', 'monitor')
-  .option('--log-level <level>', 'Log level: debug, info, warn, error', 'info')
+  .option('-m, --mode <mode>', 'Operation mode: monitor or enforce')
+  .option('--log-level <level>', 'Log level: debug, info, warn, error')
   .option('-t, --transport <type>', 'Transport type: stdio, sse, http', 'stdio')
   .option('-p, --port <port>', 'Port for HTTP/SSE transport', '3000')
   .option('-u, --upstream <url>', 'Upstream MCP server URL (for sse/http transport)')
@@ -99,13 +99,12 @@ program
 
     if (opts.logLevel) {
       const level = opts.logLevel as 'debug' | 'info' | 'warn' | 'error';
-      setLogLevel(level);
       config.log.level = level;
     }
 
     setLogLevel(config.log.level);
 
-    log.info(`mcp-fence v1.0.0 — mode: ${config.mode}`);
+    log.info(`mcp-fence v1.0.1 — mode: ${config.mode}`);
 
     // Data directory — shared by audit DB and hash pin store
     const homeDir = process.env['HOME'] ?? process.env['USERPROFILE'] ?? process.cwd();
@@ -210,7 +209,7 @@ program
   .action((opts: { config?: string }) => {
     const config = loadConfig(opts.config);
 
-    process.stdout.write('mcp-fence v1.0.0\n\n');
+    process.stdout.write('mcp-fence v1.0.1\n\n');
     process.stdout.write(`Mode:              ${config.mode}\n`);
     process.stdout.write(`Log level:         ${config.log.level}\n`);
     process.stdout.write(`Warn threshold:    ${config.detection.warnThreshold}\n`);

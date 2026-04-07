@@ -869,12 +869,10 @@ describe('Secret detection — edge cases', () => {
     expect(r.findings.some((f) => f.ruleId === 'SEC-001')).toBe(true);
   });
 
-  it('should miss secrets beyond truncation boundary', async () => {
-    // Put a secret only at the end of a very long string
+  it('should detect secrets at end of oversized input via head+tail scanning', async () => {
     const longPayload = 'x'.repeat(20000) + ' AKIAIOSFODNN7EXAMPLE';
     const r = await e.scan(res(longPayload), 'response');
-    // Secret is beyond maxInputSize, so it gets truncated
-    expect(r.findings.some((f) => f.ruleId === 'SEC-001')).toBe(false);
+    expect(r.findings.some((f) => f.ruleId === 'SEC-001')).toBe(true);
   });
 });
 
