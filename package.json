@@ -1,6 +1,6 @@
 {
   "name": "mcp-fence",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "The bidirectional firewall for MCP — scans inputs AND outputs, detects rug-pulls at runtime, zero config.",
   "type": "module",
   "main": "./dist/index.js",
@@ -39,11 +39,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yjcho/mcp-fence"
+    "url": "https://github.com/yjcho9317/mcp-fence"
   },
-  "homepage": "https://github.com/yjcho/mcp-fence#readme",
+  "homepage": "https://github.com/yjcho9317/mcp-fence#readme",
   "bugs": {
-    "url": "https://github.com/yjcho/mcp-fence/issues"
+    "url": "https://github.com/yjcho9317/mcp-fence/issues"
   },
   "engines": {
     "node": ">=18.0.0"

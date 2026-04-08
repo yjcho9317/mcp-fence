@@ -35,7 +35,7 @@ const program = new Command();
 program
   .name('mcp-fence')
   .description('The bidirectional firewall for MCP')
-  .version('1.0.1');
+  .version('1.0.2');
 
 // ─── start command ───
 
@@ -104,7 +104,7 @@ program
 
     setLogLevel(config.log.level);
 
-    log.info(`mcp-fence v1.0.1 — mode: ${config.mode}`);
+    log.info(`mcp-fence v1.0.2 — mode: ${config.mode}`);
 
     // Data directory — shared by audit DB and hash pin store
     const homeDir = process.env['HOME'] ?? process.env['USERPROFILE'] ?? process.cwd();
@@ -209,7 +209,7 @@ program
   .action((opts: { config?: string }) => {
     const config = loadConfig(opts.config);
 
-    process.stdout.write('mcp-fence v1.0.1\n\n');
+    process.stdout.write('mcp-fence v1.0.2\n\n');
     process.stdout.write(`Mode:              ${config.mode}\n`);
     process.stdout.write(`Log level:         ${config.log.level}\n`);
     process.stdout.write(`Warn threshold:    ${config.detection.warnThreshold}\n`);

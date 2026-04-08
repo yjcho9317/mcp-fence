@@ -21,6 +21,16 @@ Most MCP security tools only scan the input side. mcp-fence scans both.
 
 ---
 
+## Who needs this?
+
+You probably do if:
+
+- You connect to MCP servers you don't fully control
+- You let AI agents read files, call tools, or access secrets
+- You assume server responses are "just data"
+
+---
+
 ## Quick Start
 
 ### 1. Try it now
@@ -29,7 +39,7 @@ Most MCP security tools only scan the input side. mcp-fence scans both.
 npx mcp-fence start -- npx @modelcontextprotocol/server-filesystem /tmp
 ```
 
-That's it. mcp-fence sits between your client and server, scanning every message in real time.
+That's it. mcp-fence sits between your client and server, scanning every message in real time. Default is monitor mode — logs findings without blocking, so nothing breaks.
 
 ![mcp-fence proxy — real-time threat detection](./assets/proxy-live.png)
 
@@ -76,7 +86,7 @@ mcp-fence scan ./suspicious-prompt.txt
 # Scan inline text
 mcp-fence scan --text "ignore all previous instructions"
 
-# Scan as server response direction
+# Scan as a server response
 mcp-fence scan ./response.json --direction response
 ```
 
@@ -121,7 +131,7 @@ Modules are decoupled: detection doesn't import policy, audit doesn't import det
 
 | Category | Patterns | Examples |
 |----------|----------|---------|
-| Prompt injection | 13 | Instruction override, role hijacking, hidden instructions, 10-language multilingual |
+| Prompt injection | 13 | Instruction override, role hijacking, hidden instructions, multilingual injection (10 languages) |
 | Command injection | 6 | Shell metacharacters, dangerous commands, sensitive file access |
 | Data exfiltration | 6 | URL exfil, DNS exfil, encoded exfil |
 | Secret detection | 24 | AWS, GitHub, Slack, Stripe, OpenAI, JWT, private keys, connection strings |
@@ -147,6 +157,7 @@ Modules are decoupled: detection doesn't import policy, audit doesn't import det
 - Detection is regex-based. Known patterns are caught, but novel injection via paraphrase or synonyms will pass through. ML-based semantic detection is planned for v1.x.
 - TOFU pinning trusts on first observation. If the first contact is already compromised, it won't be detected.
 - MCP09 (Supply Chain) is only partially covered — runtime behavior inspection catches post-compromise activity, but there's no package-level verification.
+- Large responses are scanned at the head and tail only. Content in the middle of very large messages may not be inspected.
 
 Full threat model: [THREAT_MODEL.md](./THREAT_MODEL.md)
 
@@ -167,7 +178,13 @@ Full threat model: [THREAT_MODEL.md](./THREAT_MODEL.md)
 | MCP09 | Supply Chain Compromise | Partial | Runtime behavior inspection; no package-level verification |
 | MCP10 | Context Injection | Yes | Context budget + bidirectional injection scanning |
 
-**CVE coverage:** Tested against 44 known MCP vulnerabilities (16 specific CVEs) across 86 attack scenarios with 86% detection rate. Remaining 14% are server-implementation flaws outside proxy scope.
+**CVE coverage:** Tested against 44 known MCP vulnerabilities (13 specific CVEs) across 86 attack scenarios with 86% detection rate. Remaining 14% are server-implementation flaws outside proxy scope.
+
+Or install globally:
+
+```bash
+npm install -g mcp-fence
+```
 
 ---
 
@@ -300,7 +317,7 @@ mcp-fence status
 
 ## Programmatic Usage
 
-mcp-fence can also be used as a library in your own Node.js applications. See the [API section on the wiki](https://github.com/yjcho9317/mcp-fence/wiki) for details.
+mcp-fence exports its detection engine, policy engine, and audit logger as importable modules. See the source code in `src/` for available APIs.
 
 ---
 
@@ -329,6 +346,8 @@ npm test
 npm run typecheck
 npm run lint
 ```
+
+Security vulnerabilities: please report via [THREAT_MODEL.md](./THREAT_MODEL.md#responsible-disclosure). Do not open public issues for security bugs.
 
 Security-critical modules (`src/detection/`, `src/integrity/`, `src/policy/local.ts`) require manual review on every PR. No exceptions.
 

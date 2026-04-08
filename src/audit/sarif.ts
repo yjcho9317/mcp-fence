@@ -113,7 +113,7 @@ export function toSarif(events: EventRow[]): SarifDocument {
         tool: {
           driver: {
             name: 'mcp-fence',
-            version: '1.0.1',
+            version: '1.0.2',
             informationUri: 'https://github.com/yjcho9317/mcp-fence',
             rules: Array.from(rulesMap.values()),
           },
